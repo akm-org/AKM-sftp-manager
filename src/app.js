@@ -113,7 +113,7 @@ app.get('/api/config/defaults', (req, res) => {
     defaultHost: config.defaultSftpHost || '',
     defaultPort: config.defaultSftpPort || 22,
     defaultUsername: config.defaultSftpUsername || '',
-    databaseType: config.postgresUrl ? 'supabase_postgres' : 'sqlite',
+    databaseType: db.getType(),
   });
 });
 

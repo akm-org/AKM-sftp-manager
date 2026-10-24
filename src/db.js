@@ -1,40 +1,82 @@
 import { config } from './config.js';
+import { createClient } from '@supabase/supabase-js';
+import { MongoClient } from 'mongodb';
 import pg from 'pg';
 import path from 'path';
 import fs from 'fs';
 
-const isPostgres = !!config.postgresUrl;
-
-class UniversalDB {
+class UniversalDatabase {
   constructor() {
-    this.isPostgres = isPostgres;
+    this.type = 'sqlite';
+    this.supabase = null;
+    this.mongo = null;
+    this.mongoDb = null;
     this.pgPool = null;
     this.sqliteDb = null;
     this.readyPromise = this.init();
   }
 
   async init() {
-    if (this.isPostgres) {
-      console.log('📦 Initializing Supabase / PostgreSQL Database Connection...');
-      this.pgPool = new pg.Pool({
-        connectionString: config.postgresUrl,
-        ssl: { rejectUnauthorized: false },
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
-      });
-
-      await this.initPostgresSchema();
-    } else {
-      if (typeof Bun !== 'undefined') {
-        const { Database } = await import('bun:sqlite');
-        this.sqliteDb = new Database(config.dbPath, { create: true });
-      } else {
-        const { DatabaseSync } = await import('node:sqlite');
-        this.sqliteDb = new DatabaseSync(config.dbPath);
+    // 1. Check MongoDB
+    if (config.mongoUri) {
+      try {
+        console.log('🍃 Initializing MongoDB connection...');
+        this.mongo = new MongoClient(config.mongoUri);
+        await this.mongo.connect();
+        this.mongoDb = this.mongo.db();
+        this.type = 'mongodb';
+        console.log('✅ Connected to MongoDB successfully.');
+        return;
+      } catch (err) {
+        console.warn('⚠️ MongoDB connection failed, falling back:', err.message);
       }
-      this.initSqliteSchema();
     }
+
+    // 2. Check Supabase (REST API)
+    if (config.supabaseUrl && (config.supabaseServiceKey || config.supabaseAnonKey)) {
+      try {
+        console.log('⚡ Initializing Supabase REST Client...');
+        const key = config.supabaseServiceKey || config.supabaseAnonKey;
+        this.supabase = createClient(config.supabaseUrl, key, {
+          auth: { persistSession: false },
+        });
+        this.type = 'supabase';
+        console.log('✅ Supabase client initialized.');
+      } catch (err) {
+        console.warn('⚠️ Supabase init failed:', err.message);
+      }
+    }
+
+    // 3. Check Postgres URL (if direct pooler URL is provided)
+    if (config.postgresUrl) {
+      try {
+        console.log('🐘 Initializing PostgreSQL connection...');
+        this.pgPool = new pg.Pool({
+          connectionString: config.postgresUrl,
+          ssl: { rejectUnauthorized: false },
+        });
+        await this.initPostgresSchema();
+        this.type = 'postgres';
+        console.log('✅ PostgreSQL connected.');
+        return;
+      } catch (err) {
+        console.warn('⚠️ PostgreSQL connection failed, falling back:', err.message);
+      }
+    }
+
+    // Always initialize SQLite as persistent fallback
+    await this.initSqlite();
+  }
+
+  async initSqlite() {
+    if (typeof Bun !== 'undefined') {
+      const { Database } = await import('bun:sqlite');
+      this.sqliteDb = new Database(config.dbPath, { create: true });
+    } else {
+      const { DatabaseSync } = await import('node:sqlite');
+      this.sqliteDb = new DatabaseSync(config.dbPath);
+    }
+    this.initSqliteSchema();
   }
 
   async initPostgresSchema() {
@@ -134,74 +176,206 @@ class UniversalDB {
     }
   }
 
-  convertPlaceholders(sql) {
-    let index = 1;
-    let converted = sql.replace(/\?/g, () => `$${index++}`);
-
-    // Convert SQLite INSERT OR REPLACE to Postgres ON CONFLICT
-    if (this.isPostgres) {
-      if (converted.includes('INSERT OR REPLACE INTO active_sessions')) {
-        converted = converted.replace(
-          'INSERT OR REPLACE INTO active_sessions (session_id, user_id, host, port, username, password_encrypted, private_key_encrypted, initial_path, current_path)',
-          `INSERT INTO active_sessions (session_id, user_id, host, port, username, password_encrypted, private_key_encrypted, initial_path, current_path)
-           ON CONFLICT (session_id) DO UPDATE SET
-             host = EXCLUDED.host,
-             port = EXCLUDED.port,
-             username = EXCLUDED.username,
-             password_encrypted = EXCLUDED.password_encrypted,
-             private_key_encrypted = EXCLUDED.private_key_encrypted,
-             initial_path = EXCLUDED.initial_path,
-             current_path = EXCLUDED.current_path,
-             last_used_at = CURRENT_TIMESTAMP`
-        );
-      }
+  // --- MONGODB OPERATIONS ---
+  async getMongo(sql, params) {
+    if (sql.includes('FROM users WHERE username = ?')) {
+      const u = await this.mongoDb.collection('users').findOne({ username: params[0] });
+      return u ? { ...u, id: u._id.toString() } : null;
     }
-    return converted;
+    if (sql.includes('FROM users WHERE id = ?')) {
+      const u = await this.mongoDb.collection('users').findOne({ _id: params[0] });
+      return u ? { ...u, id: u._id.toString() } : null;
+    }
+    if (sql.includes('FROM connections WHERE id = ? AND user_id = ?')) {
+      const c = await this.mongoDb.collection('connections').findOne({ _id: params[0], user_id: params[1] });
+      return c ? { ...c, id: c._id.toString() } : null;
+    }
+    if (sql.includes('FROM active_sessions WHERE session_id = ?')) {
+      const s = await this.mongoDb.collection('active_sessions').findOne({ session_id: params[0] });
+      return s ? { ...s, id: s._id.toString() } : null;
+    }
+    return null;
   }
 
-  async exec(sql) {
-    await this.readyPromise;
-    if (this.isPostgres) {
-      return this.pgPool.query(sql);
+  // --- SUPABASE OPERATIONS ---
+  async getSupabase(sql, params) {
+    if (sql.includes('FROM users WHERE username = ?')) {
+      const { data, error } = await this.supabase.from('users').select('*').eq('username', params[0]).maybeSingle();
+      if (error) throw error;
+      return data;
     }
-    if (typeof this.sqliteDb.run === 'function' && typeof Bun !== 'undefined') {
-      return this.sqliteDb.run(sql);
+    if (sql.includes('FROM users WHERE id = ?')) {
+      const { data, error } = await this.supabase.from('users').select('*').eq('id', params[0]).maybeSingle();
+      if (error) throw error;
+      return data;
     }
-    return this.sqliteDb.exec(sql);
+    if (sql.includes('FROM connections WHERE id = ? AND user_id = ?')) {
+      const { data, error } = await this.supabase.from('connections').select('*').eq('id', params[0]).eq('user_id', params[1]).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    if (sql.includes('FROM connections WHERE user_id = ? ORDER BY id DESC LIMIT 1')) {
+      const { data, error } = await this.supabase.from('connections').select('*').eq('user_id', params[0]).order('id', { ascending: false }).limit(1).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    if (sql.includes('FROM active_sessions WHERE session_id = ? AND user_id = ?')) {
+      const { data, error } = await this.supabase.from('active_sessions').select('*').eq('session_id', params[0]).eq('user_id', params[1]).maybeSingle();
+      if (error) throw error;
+      return data;
+    }
+    return null;
   }
 
+  async querySupabase(sql, params) {
+    if (sql.includes('FROM connections WHERE user_id = ?')) {
+      const { data, error } = await this.supabase.from('connections').select('*').eq('user_id', params[0]).order('id', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+    return [];
+  }
+
+  async runSupabase(sql, params) {
+    if (sql.includes('INSERT INTO users')) {
+      const { data, error } = await this.supabase.from('users').insert({
+        username: params[0],
+        email: params[1],
+        password_hash: params[2],
+      }).select().single();
+      if (error) throw error;
+      return data;
+    }
+    if (sql.includes('INSERT INTO connections')) {
+      const { data, error } = await this.supabase.from('connections').insert({
+        user_id: params[0],
+        name: params[1],
+        host: params[2],
+        port: params[3],
+        username: params[4],
+        password_encrypted: params[5],
+        auth_type: params[6],
+        private_key_encrypted: params[7],
+        default_path: params[8],
+      }).select().single();
+      if (error) throw error;
+      return data;
+    }
+    if (sql.includes('UPDATE connections')) {
+      const { error } = await this.supabase.from('connections').update({
+        name: params[0],
+        host: params[1],
+        port: params[2],
+        username: params[3],
+        password_encrypted: params[4],
+        auth_type: params[5],
+        private_key_encrypted: params[6],
+        default_path: params[7],
+      }).eq('id', params[8]).eq('user_id', params[9]);
+      if (error) throw error;
+      return { success: true };
+    }
+    if (sql.includes('DELETE FROM connections')) {
+      const { error } = await this.supabase.from('connections').delete().eq('id', params[0]).eq('user_id', params[1]);
+      if (error) throw error;
+      return { success: true };
+    }
+    if (sql.includes('INSERT OR REPLACE INTO active_sessions') || sql.includes('INSERT INTO active_sessions')) {
+      const { error } = await this.supabase.from('active_sessions').upsert({
+        session_id: params[0],
+        user_id: params[1],
+        host: params[2],
+        port: params[3],
+        username: params[4],
+        password_encrypted: params[5],
+        private_key_encrypted: params[6],
+        initial_path: params[7],
+        current_path: params[8],
+      });
+      if (error) throw error;
+      return { success: true };
+    }
+    if (sql.includes('DELETE FROM active_sessions')) {
+      const { error } = await this.supabase.from('active_sessions').delete().eq('session_id', params[0]);
+      if (error) throw error;
+      return { success: true };
+    }
+    if (sql.includes('UPDATE active_sessions SET current_path')) {
+      const { error } = await this.supabase.from('active_sessions').update({
+        current_path: params[0],
+      }).eq('session_id', params[1]);
+      if (error) throw error;
+      return { success: true };
+    }
+    return null;
+  }
+
+  // --- UNIFIED PUBLIC API WITH AUTO-FALLBACK ---
   async get(sql, params = []) {
     await this.readyPromise;
-    if (this.isPostgres) {
-      const pgSql = this.convertPlaceholders(sql);
-      const res = await this.pgPool.query(pgSql, params);
-      return res.rows[0] || null;
+
+    // Try Supabase first if available
+    if (this.type === 'supabase' && this.supabase) {
+      try {
+        const res = await this.getSupabase(sql, params);
+        if (res !== null) return res;
+      } catch (err) {
+        console.warn('⚠️ Supabase get failed, falling back to SQLite:', err.message);
+      }
     }
+
+    // Try MongoDB if available
+    if (this.type === 'mongodb' && this.mongoDb) {
+      try {
+        const res = await this.getMongo(sql, params);
+        if (res !== null) return res;
+      } catch (err) {
+        console.warn('⚠️ MongoDB get failed, falling back to SQLite:', err.message);
+      }
+    }
+
+    // SQLite fallback
+    if (!this.sqliteDb) await this.initSqlite();
     const stmt = this.sqliteDb.prepare(sql);
     return stmt.get(...params);
   }
 
   async query(sql, params = []) {
     await this.readyPromise;
-    if (this.isPostgres) {
-      const pgSql = this.convertPlaceholders(sql);
-      const res = await this.pgPool.query(pgSql, params);
-      return res.rows;
+
+    if (this.type === 'supabase' && this.supabase) {
+      try {
+        return await this.querySupabase(sql, params);
+      } catch (err) {
+        console.warn('⚠️ Supabase query failed, falling back to SQLite:', err.message);
+      }
     }
+
+    if (!this.sqliteDb) await this.initSqlite();
     const stmt = this.sqliteDb.prepare(sql);
     return stmt.all(...params);
   }
 
   async run(sql, params = []) {
     await this.readyPromise;
-    if (this.isPostgres) {
-      const pgSql = this.convertPlaceholders(sql);
-      const res = await this.pgPool.query(pgSql, params);
-      return { rowCount: res.rowCount };
+
+    if (this.type === 'supabase' && this.supabase) {
+      try {
+        const res = await this.runSupabase(sql, params);
+        if (res) return res;
+      } catch (err) {
+        console.warn('⚠️ Supabase run failed, falling back to SQLite:', err.message);
+      }
     }
+
+    if (!this.sqliteDb) await this.initSqlite();
     const stmt = this.sqliteDb.prepare(sql);
     return stmt.run(...params);
   }
+
+  getType() {
+    return this.type;
+  }
 }
 
-export const db = new UniversalDB();
+export const db = new UniversalDatabase();
