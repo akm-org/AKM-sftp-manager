@@ -231,7 +231,7 @@ app.delete('/api/connections/:id', authMiddleware, async (req, res) => {
 
 app.post('/api/connections/test', authMiddleware, async (req, res) => {
   try {
-    let { host, port, username, password, private_key, connectionId } = req.body;
+    let { host, port, username, password, private_key, connectionId, protocol } = req.body;
 
     if (connectionId) {
       const conn = await db.get('SELECT * FROM connections WHERE id = ? AND user_id = ?', [connectionId, req.user.id]);
@@ -241,6 +241,7 @@ app.post('/api/connections/test', authMiddleware, async (req, res) => {
       username = conn.username;
       password = conn.password_encrypted ? decrypt(conn.password_encrypted) : '';
       private_key = conn.private_key_encrypted ? decrypt(conn.private_key_encrypted) : '';
+      if (!protocol) protocol = conn.auth_type;
     }
 
     if (!host || !username) {
@@ -253,6 +254,7 @@ app.post('/api/connections/test', authMiddleware, async (req, res) => {
       username,
       password,
       privateKey: private_key,
+      protocol,
     });
 
     return res.json(result);
@@ -261,10 +263,10 @@ app.post('/api/connections/test', authMiddleware, async (req, res) => {
   }
 });
 
-// --- SFTP SESSION & FILE MANAGEMENT ROUTES ---
+// --- SFTP / FTP SESSION & FILE MANAGEMENT ROUTES ---
 app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
   try {
-    let { connectionId, host, port, username, password, private_key, default_path, saveConnection, name } = req.body;
+    let { connectionId, host, port, username, password, private_key, default_path, saveConnection, name, protocol } = req.body;
 
     let connectionConfig = null;
 
@@ -285,6 +287,7 @@ app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
         password: decryptedPassword,
         privateKey: decryptedKey,
         defaultPath: conn.default_path,
+        protocol: conn.auth_type === 'ftp' || conn.port === 21 ? 'ftp' : 'sftp',
       };
 
       await db.run('UPDATE connections SET last_connected_at = CURRENT_TIMESTAMP WHERE id = ?', [conn.id]);
@@ -293,14 +296,18 @@ app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'Host and username are required.' });
       }
 
+      const portNum = parseInt(port, 10) || (protocol === 'ftp' ? 21 : 22);
+      const proto = protocol || (portNum === 21 ? 'ftp' : 'sftp');
+
       connectionConfig = {
         name: name || host,
         host: host.trim(),
-        port: parseInt(port, 10) || 22,
+        port: portNum,
         username: username.trim(),
         password: password || '',
         privateKey: private_key || '',
         defaultPath: default_path || '/',
+        protocol: proto,
       };
 
       if (saveConnection) {
@@ -310,7 +317,7 @@ app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
           await db.run(
             `INSERT INTO connections (user_id, name, host, port, username, password_encrypted, auth_type, private_key_encrypted, default_path, last_connected_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [req.user.id, (name || host).trim(), host.trim(), connectionConfig.port, username.trim(), encPass, 'password', encKey, connectionConfig.defaultPath]
+            [req.user.id, (name || host).trim(), host.trim(), connectionConfig.port, username.trim(), encPass, proto, encKey, connectionConfig.defaultPath]
           );
         } catch (e) {
           console.warn('Could not auto-save connection:', e.message);

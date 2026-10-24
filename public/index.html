@@ -410,6 +410,14 @@
       </div>
 
       <form id="quickConnectForm" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Connection Protocol</label>
+          <select id="qcProtocol" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-medium cursor-pointer">
+            <option value="sftp">SFTP (SSH Protocol - Port 22 - VPS / Linux Servers)</option>
+            <option value="ftp">FTP / FTPS (File Transfer Protocol - Port 21 - Apex Hosting, Multicraft, cPanel)</option>
+          </select>
+        </div>
+
         <div class="grid grid-cols-3 gap-3">
           <div class="col-span-2">
             <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Host / Address</label>
@@ -484,6 +492,14 @@
       <form id="connectionForm" class="space-y-4">
         <input type="hidden" id="connEditId" value="" />
         
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Connection Protocol</label>
+          <select id="connProtocol" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium cursor-pointer">
+            <option value="sftp">SFTP (SSH Protocol - Port 22 - VPS / Linux Servers)</option>
+            <option value="ftp">FTP / FTPS (File Transfer Protocol - Port 21 - Apex Hosting, Multicraft, cPanel)</option>
+          </select>
+        </div>
+
         <div>
           <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Connection Label</label>
           <input type="text" id="connName" required placeholder="e.g. Production Web, VPS 01, Staging" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500" />

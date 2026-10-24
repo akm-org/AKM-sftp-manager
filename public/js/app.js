@@ -80,6 +80,7 @@
     // Modals
     quickConnectModal: document.getElementById('quickConnectModal'),
     quickConnectForm: document.getElementById('quickConnectForm'),
+    qcProtocol: document.getElementById('qcProtocol'),
     qcHost: document.getElementById('qcHost'),
     qcPort: document.getElementById('qcPort'),
     qcUsername: document.getElementById('qcUsername'),
@@ -93,6 +94,7 @@
     connectionModalTitle: document.getElementById('connectionModalTitle'),
     connectionForm: document.getElementById('connectionForm'),
     connEditId: document.getElementById('connEditId'),
+    connProtocol: document.getElementById('connProtocol'),
     connName: document.getElementById('connName'),
     connHost: document.getElementById('connHost'),
     connPort: document.getElementById('connPort'),
@@ -365,7 +367,10 @@
                 <i class="fa-solid fa-server"></i>
               </div>
               <div>
-                <h4 class="font-bold text-white text-sm tracking-tight truncate max-w-[170px]">${escapeHtml(conn.name)}</h4>
+                <div class="flex items-center gap-1.5">
+                  <h4 class="font-bold text-white text-sm tracking-tight truncate max-w-[150px]">${escapeHtml(conn.name)}</h4>
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${conn.auth_type === 'ftp' || conn.port === 21 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'}">${conn.auth_type === 'ftp' || conn.port === 21 ? 'FTP' : 'SFTP'}</span>
+                </div>
                 <span class="text-[10px] text-slate-400 font-mono">${escapeHtml(conn.username)}@${escapeHtml(conn.host)}:${conn.port}</span>
               </div>
             </div>
@@ -484,7 +489,8 @@
 
   function openEditConnectionModal(conn) {
     el.connEditId.value = conn.id;
-    el.connectionModalTitle.textContent = 'Edit SFTP Connection';
+    el.connectionModalTitle.textContent = 'Edit Connection';
+    el.connProtocol.value = conn.auth_type === 'ftp' || conn.port === 21 ? 'ftp' : 'sftp';
     el.connName.value = conn.name;
     el.connHost.value = conn.host;
     el.connPort.value = conn.port;
@@ -497,8 +503,9 @@
 
   function openNewConnectionModal() {
     el.connEditId.value = '';
-    el.connectionModalTitle.textContent = 'Save SFTP Connection';
+    el.connectionModalTitle.textContent = 'Save Connection';
     el.connectionForm.reset();
+    el.connProtocol.value = 'sftp';
     el.connPort.value = '22';
     el.connDefaultPath.value = '/';
     el.passwordHint.classList.add('hidden');
@@ -1032,6 +1039,27 @@
   });
   el.quickConnectModalBtn.addEventListener('click', () => openModal(el.quickConnectModal));
 
+  // Protocol selector events
+  if (el.qcProtocol) {
+    el.qcProtocol.addEventListener('change', () => {
+      if (el.qcProtocol.value === 'ftp') {
+        if (el.qcPort.value === '22') el.qcPort.value = '21';
+      } else {
+        if (el.qcPort.value === '21') el.qcPort.value = '22';
+      }
+    });
+  }
+
+  if (el.connProtocol) {
+    el.connProtocol.addEventListener('change', () => {
+      if (el.connProtocol.value === 'ftp') {
+        if (el.connPort.value === '22') el.connPort.value = '21';
+      } else {
+        if (el.connPort.value === '21') el.connPort.value = '22';
+      }
+    });
+  }
+
   el.qcSaveConnection.addEventListener('change', (e) => {
     if (e.target.checked) {
       el.qcNameGroup.classList.remove('hidden');
@@ -1042,6 +1070,7 @@
 
   el.quickConnectForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const protocol = el.qcProtocol ? el.qcProtocol.value : (parseInt(el.qcPort.value, 10) === 21 ? 'ftp' : 'sftp');
     const host = el.qcHost.value.trim();
     const port = el.qcPort.value;
     const username = el.qcUsername.value.trim();
@@ -1050,13 +1079,14 @@
     const saveConnection = el.qcSaveConnection.checked;
     const name = el.qcName.value.trim() || host;
 
-    showToast('Connecting to SFTP server...', 'info');
+    showToast(`Connecting to remote ${protocol.toUpperCase()} server...`, 'info');
     closeModal(el.quickConnectModal);
 
     try {
       const res = await api('/api/sftp/connect', {
         method: 'POST',
         body: JSON.stringify({
+          protocol,
           host,
           port,
           username,
@@ -1103,6 +1133,7 @@
   el.emptyAddBtn.addEventListener('click', openNewConnectionModal);
 
   el.testFormConnBtn.addEventListener('click', async () => {
+    const protocol = el.connProtocol ? el.connProtocol.value : (parseInt(el.connPort.value, 10) === 21 ? 'ftp' : 'sftp');
     const host = el.connHost.value.trim();
     const port = el.connPort.value;
     const username = el.connUsername.value.trim();
@@ -1121,10 +1152,10 @@
     try {
       const res = await api('/api/connections/test', {
         method: 'POST',
-        body: JSON.stringify({ host, port, username, password, connectionId }),
+        body: JSON.stringify({ protocol, host, port, username, password, connectionId }),
       });
       if (res.success) {
-        showToast(`Server reached! Latency: ${res.latencyMs}ms`, 'success');
+        showToast(`${(res.protocol || 'Server').toUpperCase()} reached! Latency: ${res.latencyMs}ms`, 'success');
       } else {
         showToast(`Connection test failed: ${res.error}`, 'error');
       }
@@ -1139,12 +1170,15 @@
   el.connectionForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const editId = el.connEditId.value;
+    const protocol = el.connProtocol ? el.connProtocol.value : (parseInt(el.connPort.value, 10) === 21 ? 'ftp' : 'sftp');
     const payload = {
       name: el.connName.value.trim(),
       host: el.connHost.value.trim(),
       port: el.connPort.value,
       username: el.connUsername.value.trim(),
       password: el.connPassword.value,
+      auth_type: protocol,
+      protocol: protocol,
       default_path: el.connDefaultPath.value.trim() || '/',
     };
 
