@@ -3,8 +3,10 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { config } from './config.js';
+import { db } from './db.js';
+import { encrypt, decrypt } from './crypto.js';
 
-// Map of active SFTP sessions: sessionId -> { client, info, lastUsed, timeoutTimer }
+// In-memory cache of active SFTP sessions: sessionId -> { client, info, lastUsed, timeoutTimer }
 const sessions = new Map();
 
 export class SFTPManager {
@@ -17,18 +19,70 @@ export class SFTPManager {
     return normalized;
   }
 
-  static getSession(sessionId, userId) {
-    const session = sessions.get(sessionId);
-    if (!session) {
-      throw new Error('SFTP session not found or expired. Please reconnect.');
+  static async getSession(sessionId, userId) {
+    let session = sessions.get(sessionId);
+
+    // If session exists in-memory and belongs to user
+    if (session) {
+      if (session.userId !== userId) {
+        throw new Error('Unauthorized access to session.');
+      }
+      session.lastUsed = Date.now();
+      this.resetSessionTimeout(sessionId);
+      return session;
     }
-    if (session.userId !== userId) {
-      throw new Error('Unauthorized access to session.');
+
+    // In a serverless environment (like Vercel), the lambda might have restarted.
+    // Recover session from database:
+    const row = db.get('SELECT * FROM active_sessions WHERE session_id = ? AND user_id = ?', [sessionId, userId]);
+    if (!row) {
+      throw new Error('SFTP session expired or not found. Please reconnect.');
     }
-    // Update last used timestamp
-    session.lastUsed = Date.now();
-    this.resetSessionTimeout(sessionId);
-    return session;
+
+    // Re-establish connection
+    const client = new Client();
+    const connectOptions = {
+      host: row.host.trim(),
+      port: parseInt(row.port, 10) || 22,
+      username: row.username.trim(),
+      readyTimeout: 15000,
+      keepaliveInterval: 15000,
+    };
+
+    if (row.private_key_encrypted) {
+      connectOptions.privateKey = decrypt(row.private_key_encrypted);
+    } else if (row.password_encrypted) {
+      connectOptions.password = decrypt(row.password_encrypted);
+    }
+
+    try {
+      await client.connect(connectOptions);
+
+      session = {
+        sessionId,
+        userId,
+        client,
+        info: {
+          host: row.host,
+          port: row.port,
+          username: row.username,
+          name: `${row.username}@${row.host}`,
+          connectedAt: row.last_used_at,
+          initialPath: row.initial_path,
+        },
+        currentPath: row.current_path || row.initial_path || '/',
+        lastUsed: Date.now(),
+        timeoutTimer: null,
+      };
+
+      sessions.set(sessionId, session);
+      this.resetSessionTimeout(sessionId);
+      return session;
+    } catch (err) {
+      // Remove stale record from database if re-connect fails
+      db.run('DELETE FROM active_sessions WHERE session_id = ?', [sessionId]);
+      throw new Error(`Failed to reconnect to SFTP: ${err.message}`);
+    }
   }
 
   static resetSessionTimeout(sessionId) {
@@ -40,7 +94,7 @@ export class SFTPManager {
     }
 
     session.timeoutTimer = setTimeout(async () => {
-      console.log(`[SFTP] Session ${sessionId} timed out due to inactivity.`);
+      console.log(`[SFTP] Session ${sessionId} timed out.`);
       await this.disconnect(sessionId);
     }, config.sessionTimeoutMs);
   }
@@ -134,6 +188,19 @@ export class SFTPManager {
       sessions.set(sessionId, sessionData);
       this.resetSessionTimeout(sessionId);
 
+      // Save encrypted session to SQLite for serverless recovery
+      try {
+        const encPass = connectionConfig.password ? encrypt(connectionConfig.password) : null;
+        const encKey = connectionConfig.privateKey ? encrypt(connectionConfig.privateKey) : null;
+        db.run(
+          `INSERT OR REPLACE INTO active_sessions (session_id, user_id, host, port, username, password_encrypted, private_key_encrypted, initial_path, current_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [sessionId, userId, connectionConfig.host, connectionConfig.port || 22, connectionConfig.username, encPass, encKey, initialPath, initialPath]
+        );
+      } catch (dbErr) {
+        console.warn('Could not persist session in db:', dbErr.message);
+      }
+
       return {
         sessionId,
         info: sessionData.info,
@@ -148,34 +215,41 @@ export class SFTPManager {
 
   static async disconnect(sessionId, userId = null) {
     const session = sessions.get(sessionId);
-    if (!session) return { message: 'Already disconnected' };
-
-    if (userId && session.userId !== userId) {
+    if (session && userId && session.userId !== userId) {
       throw new Error('Unauthorized access.');
     }
 
-    if (session.timeoutTimer) {
-      clearTimeout(session.timeoutTimer);
+    if (session) {
+      if (session.timeoutTimer) clearTimeout(session.timeoutTimer);
+      try {
+        await session.client.end();
+      } catch (err) {}
+      sessions.delete(sessionId);
     }
 
     try {
-      await session.client.end();
-    } catch (err) {
-      console.warn(`[SFTP] Error closing client: ${err.message}`);
-    } finally {
-      sessions.delete(sessionId);
-    }
+      if (userId) {
+        db.run('DELETE FROM active_sessions WHERE session_id = ? AND user_id = ?', [sessionId, userId]);
+      } else {
+        db.run('DELETE FROM active_sessions WHERE session_id = ?', [sessionId]);
+      }
+    } catch (e) {}
 
     return { message: 'Disconnected successfully' };
   }
 
   static async list(sessionId, userId, remotePath = null) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const targetPath = this.formatPath(remotePath || session.currentPath || '/');
 
     try {
       const rawList = await session.client.list(targetPath);
       session.currentPath = targetPath;
+
+      // Update in db
+      try {
+        db.run('UPDATE active_sessions SET current_path = ?, last_used_at = CURRENT_TIMESTAMP WHERE session_id = ?', [targetPath, sessionId]);
+      } catch (e) {}
 
       const items = rawList.map((item) => {
         const isDir = item.type === 'd';
@@ -193,7 +267,6 @@ export class SFTPManager {
         };
       });
 
-      // Sort: folders first, then files alphabetically
       items.sort((a, b) => {
         if (a.isDirectory && !b.isDirectory) return -1;
         if (!a.isDirectory && b.isDirectory) return 1;
@@ -218,7 +291,7 @@ export class SFTPManager {
   }
 
   static async readFile(sessionId, userId, remoteFilePath) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remoteFilePath);
 
     try {
@@ -234,7 +307,7 @@ export class SFTPManager {
   }
 
   static async writeFile(sessionId, userId, remoteFilePath, content) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remoteFilePath);
 
     try {
@@ -251,7 +324,7 @@ export class SFTPManager {
   }
 
   static async downloadFile(sessionId, userId, remoteFilePath) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remoteFilePath);
 
     try {
@@ -268,7 +341,7 @@ export class SFTPManager {
   }
 
   static async uploadFile(sessionId, userId, localFilePath, remoteDirPath, originalFilename) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const dir = this.formatPath(remoteDirPath);
     const remoteDest = path.posix.join(dir, originalFilename);
 
@@ -280,7 +353,6 @@ export class SFTPManager {
         name: originalFilename,
       };
     } catch (err) {
-      // Fallback to standard put if fastPut fails
       try {
         const fileData = fs.readFileSync(localFilePath);
         await session.client.put(fileData, remoteDest);
@@ -296,7 +368,7 @@ export class SFTPManager {
   }
 
   static async mkdir(sessionId, userId, remoteDirPath) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remoteDirPath);
 
     try {
@@ -308,7 +380,7 @@ export class SFTPManager {
   }
 
   static async createFile(sessionId, userId, remoteFilePath) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remoteFilePath);
 
     try {
@@ -320,7 +392,7 @@ export class SFTPManager {
   }
 
   static async rename(sessionId, userId, oldPath, newPath) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const fromPath = this.formatPath(oldPath);
     const toPath = this.formatPath(newPath);
 
@@ -333,11 +405,10 @@ export class SFTPManager {
   }
 
   static async chmod(sessionId, userId, remotePath, mode) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remotePath);
 
     try {
-      // mode can be octal string e.g. '755' or '0755'
       const octalMode = parseInt(mode, 8);
       await session.client.chmod(formatted, octalMode);
       return { success: true, path: formatted, mode };
@@ -347,7 +418,7 @@ export class SFTPManager {
   }
 
   static async delete(sessionId, userId, remotePath, isDirectory = false) {
-    const session = this.getSession(sessionId, userId);
+    const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remotePath);
 
     try {
@@ -358,7 +429,6 @@ export class SFTPManager {
       }
       return { success: true, path: formatted };
     } catch (err) {
-      // In case directory flag wasn't known beforehand
       try {
         if (!isDirectory) {
           await session.client.rmdir(formatted, true);
@@ -369,16 +439,17 @@ export class SFTPManager {
     }
   }
 
-  static getActiveSession(sessionId, userId) {
-    const session = sessions.get(sessionId);
-    if (!session || session.userId !== userId) {
+  static async getActiveSession(sessionId, userId) {
+    try {
+      const session = await this.getSession(sessionId, userId);
+      return {
+        sessionId: session.sessionId,
+        info: session.info,
+        currentPath: session.currentPath,
+        connectedAt: session.info.connectedAt,
+      };
+    } catch (e) {
       return null;
     }
-    return {
-      sessionId: session.sessionId,
-      info: session.info,
-      currentPath: session.currentPath,
-      connectedAt: session.info.connectedAt,
-    };
   }
 }

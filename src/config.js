@@ -5,9 +5,17 @@ import fs from 'fs';
 
 dotenv.config();
 
-const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
+// When running on Vercel, filesystem is read-only except /tmp
+const isVercel = !!process.env.VERCEL;
+const defaultDataDir = isVercel ? '/tmp/data' : path.resolve(process.cwd(), 'data');
+const DATA_DIR = process.env.DATA_DIR || defaultDataDir;
+
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (e) {
+    console.warn('Could not create DATA_DIR:', e.message);
+  }
 }
 
 // Generate or load encryption key
@@ -16,17 +24,23 @@ const keyFile = path.join(DATA_DIR, '.master_key');
 
 if (!masterKey) {
   if (fs.existsSync(keyFile)) {
-    masterKey = fs.readFileSync(keyFile, 'utf8').trim();
-  } else {
+    try {
+      masterKey = fs.readFileSync(keyFile, 'utf8').trim();
+    } catch (e) {}
+  }
+  if (!masterKey) {
     masterKey = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(keyFile, masterKey, { mode: 0o600 });
+    try {
+      fs.writeFileSync(keyFile, masterKey, { mode: 0o600 });
+    } catch (e) {}
   }
 }
 
 export const config = {
+  isVercel,
   port: parseInt(process.env.PORT || '3000', 10),
   jwtSecret: process.env.JWT_SECRET || 'akm_sftp_secure_jwt_secret_token_key_2026',
-  encryptionKey: masterKey,
+  encryptionKey: masterKey || 'fallback_master_encryption_key_32_bytes_long_123',
   dataDir: DATA_DIR,
   dbPath: process.env.DB_PATH || path.join(DATA_DIR, 'sftp_manager.db'),
   defaultSftpHost: process.env.DEFAULT_SFTP_HOST || '',

@@ -71,7 +71,22 @@ export function initSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS active_sessions (
+      session_id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER NOT NULL DEFAULT 22,
+      username TEXT NOT NULL,
+      password_encrypted TEXT,
+      private_key_encrypted TEXT,
+      initial_path TEXT DEFAULT '/',
+      current_path TEXT DEFAULT '/',
+      last_used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_connections_user_id ON connections(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON active_sessions(user_id);
   `);
 }
 
