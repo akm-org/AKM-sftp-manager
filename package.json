@@ -1,0 +1,33 @@
+{
+  "name": "akm-sftp-manager",
+  "version": "1.0.0",
+  "description": "AKM SFTP Manager - Secure, modern web-based SFTP client & panel with account vault and in-browser code editor",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "bun": "bun run src/server.js",
+    "dev": "bun --watch src/server.js"
+  },
+  "keywords": [
+    "sftp",
+    "sftp-client",
+    "sftp-manager",
+    "file-manager",
+    "web-panel",
+    "ssh",
+    "vault",
+    "editor"
+  ],
+  "author": "adwaithkm (akm-org)",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.5.0",
+    "ssh2-sftp-client": "^12.1.1"
+  }
+}

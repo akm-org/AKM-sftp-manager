@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AKM SFTP Manager - Modern Cloud & Panel SFTP Client</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+            darkBg: '#0b0f19',
+            cardBg: '#111827',
+            cardBorder: '#1f2937',
+            hoverBg: '#1f293d',
+          }
+        }
+      }
+    }
+  </script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="bg-darkBg text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-2 max-w-md w-full pointer-events-none"></div>
+
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-cardBorder bg-cardBg/80 backdrop-blur-md sticky top-0 z-30 transition-all">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <!-- Brand Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <i class="fa-solid fa-server text-white text-lg"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-indigo-300 bg-clip-text text-transparent">
+              AKM SFTP Manager
+            </span>
+            <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              Pro Panel
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 hidden sm:block">Secure Cloud & Remote File Explorer</p>
+        </div>
+      </div>
+
+      <!-- Center: Active SFTP Status Indicator -->
+      <div id="connectionStatusBadge" class="hidden md:flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-400 shadow-inner">
+        <span class="relative flex h-2.5 w-2.5">
+          <span id="statusPulse" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-400 opacity-75"></span>
+          <span id="statusDot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-500"></span>
+        </span>
+        <span id="statusText" class="font-medium">No Active Connection</span>
+        <button id="disconnectHeaderBtn" class="hidden ml-2 text-rose-400 hover:text-rose-300 transition-colors" title="Disconnect Session">
+          <i class="fa-solid fa-power-off"></i>
+        </button>
+      </div>
+
+      <!-- Right: User & Actions -->
+      <div class="flex items-center gap-3">
+        <div id="userMenu" class="hidden flex items-center gap-3">
+          <div class="flex items-center gap-2 text-sm bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60">
+            <i class="fa-regular fa-user text-indigo-400"></i>
+            <span id="usernameDisplay" class="font-semibold text-slate-200"></span>
+          </div>
+          <button id="logoutBtn" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5" title="Logout">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span class="hidden sm:inline">Logout</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- AUTH SECTION (Show when not logged in) -->
+    <div id="authSection" class="max-w-md mx-auto my-12">
+      <div class="bg-cardBg border border-cardBorder rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden backdrop-blur-xl">
+        <div class="absolute -top-24 -right-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -bottom-24 -left-24 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="text-center mb-6">
+          <div class="w-14 h-14 mx-auto rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-3 shadow-inner">
+            <i class="fa-solid fa-shield-halved text-2xl"></i>
+          </div>
+          <h2 class="text-2xl font-bold tracking-tight text-white">AKM SFTP Panel Access</h2>
+          <p class="text-sm text-slate-400 mt-1">Sign in or register your account to manage secure SFTP connections</p>
+        </div>
+
+        <!-- Auth Tabs -->
+        <div class="flex p-1 bg-slate-900/80 rounded-xl mb-6 border border-slate-800">
+          <button id="tabLoginBtn" class="flex-1 py-2 text-sm font-semibold rounded-lg text-white bg-indigo-600 shadow transition-all">Sign In</button>
+          <button id="tabRegisterBtn" class="flex-1 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-slate-200 transition-all">Create Account</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="loginForm" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Username</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                <i class="fa-regular fa-user"></i>
+              </span>
+              <input type="text" id="loginUsername" required class="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition" placeholder="Enter username" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Password</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <input type="password" id="loginPassword" required class="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl pl-10 pr-10 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition" placeholder="••••••••" />
+              <button type="button" class="toggle-password absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300" data-target="loginPassword">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          <button type="submit" id="loginSubmitBtn" class="w-full mt-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-600 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-indigo-600/30 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2">
+            <span>Sign In to Panel</span>
+            <i class="fa-solid fa-arrow-right text-xs"></i>
+          </button>
+        </form>
+
+        <!-- Register Form (Hidden initially) -->
+        <form id="registerForm" class="space-y-4 hidden">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Username</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                <i class="fa-regular fa-user"></i>
+              </span>
+              <input type="text" id="regUsername" required minlength="3" class="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition" placeholder="Choose a username" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Email (Optional)</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                <i class="fa-regular fa-envelope"></i>
+              </span>
+              <input type="email" id="regEmail" class="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition" placeholder="your@email.com" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Password</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                <i class="fa-solid fa-lock"></i>
+              </span>
+              <input type="password" id="regPassword" required minlength="6" class="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl pl-10 pr-10 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition" placeholder="At least 6 characters" />
+              <button type="button" class="toggle-password absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300" data-target="regPassword">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          <button type="submit" id="regSubmitBtn" class="w-full mt-2 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-cyan-600/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2">
+            <span>Create Account & Start</span>
+            <i class="fa-solid fa-user-plus text-xs"></i>
+          </button>
+        </form>
+
+        <!-- Feature Badges Footer -->
+        <div class="mt-6 pt-5 border-t border-slate-800 grid grid-cols-2 gap-2 text-center text-xs text-slate-400">
+          <div class="flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-lock text-emerald-400"></i>
+            <span>AES-256 Vault</span>
+          </div>
+          <div class="flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-bolt text-amber-400"></i>
+            <span>Instant SFTP Stream</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- APP SECTION (Show when logged in) -->
+    <div id="appSection" class="hidden space-y-6">
+
+      <!-- Navigation Tabs & Quick Stats -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2 border-b border-cardBorder">
+        <div class="flex items-center gap-2 p-1 bg-cardBg border border-cardBorder rounded-xl">
+          <button id="viewFilesBtn" class="tab-btn active px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition bg-indigo-600 text-white shadow">
+            <i class="fa-solid fa-folder-open"></i>
+            <span>File Explorer</span>
+          </button>
+          <button id="viewVaultBtn" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition text-slate-400 hover:text-white">
+            <i class="fa-solid fa-vault"></i>
+            <span>Saved Connections</span>
+            <span id="vaultBadgeCount" class="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-slate-800 text-indigo-400">0</span>
+          </button>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button id="quickConnectModalBtn" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm font-medium flex items-center gap-2 transition">
+            <i class="fa-solid fa-plug text-cyan-400"></i>
+            <span>Quick Connect</span>
+          </button>
+          <button id="addNewConnectionBtn" class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-600 text-white text-sm font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition">
+            <i class="fa-solid fa-plus"></i>
+            <span>Add Connection</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- VIEW 1: SFTP FILE EXPLORER -->
+      <div id="fileExplorerView" class="space-y-4">
+
+        <!-- Not Connected Banner -->
+        <div id="notConnectedBanner" class="bg-cardBg border border-cardBorder rounded-2xl p-8 sm:p-12 text-center shadow-xl">
+          <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-4">
+            <i class="fa-solid fa-network-wired text-3xl"></i>
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">No SFTP Server Connected</h3>
+          <p class="text-sm text-slate-400 max-w-md mx-auto mb-6">
+            Connect to an SFTP server to browse remote directories, upload and download files, or edit code and configurations directly.
+          </p>
+          <div class="flex flex-wrap items-center justify-center gap-3">
+            <button class="trigger-quick-connect px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition">
+              <i class="fa-solid fa-plug"></i>
+              <span>Enter SFTP Host & Connect</span>
+            </button>
+            <button class="trigger-vault-switch px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-sm font-medium flex items-center gap-2 transition">
+              <i class="fa-solid fa-vault"></i>
+              <span>Select from Saved Vault</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Explorer Container (Visible when connected) -->
+        <div id="explorerContainer" class="hidden space-y-4">
+          <!-- Explorer Top Bar: Breadcrumbs, Refresh, Up, Direct Path Input -->
+          <div class="bg-cardBg border border-cardBorder rounded-2xl p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-lg">
+            
+            <!-- Breadcrumbs / Path -->
+            <div class="flex items-center gap-2 overflow-x-auto flex-1 min-w-0 py-1">
+              <button id="navUpBtn" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shrink-0" title="Go up one directory">
+                <i class="fa-solid fa-arrow-up"></i>
+                <span class="hidden sm:inline">Up</span>
+              </button>
+              <button id="navRefreshBtn" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shrink-0" title="Refresh directory">
+                <i class="fa-solid fa-rotate-right"></i>
+              </button>
+              <div id="breadcrumbsList" class="flex items-center gap-1 text-sm font-mono text-slate-300 overflow-x-auto whitespace-nowrap">
+                <!-- Dynamic breadcrumbs injected here -->
+              </div>
+            </div>
+
+            <!-- Path Jump Input & Search -->
+            <div class="flex items-center gap-2 shrink-0">
+              <div class="relative w-44 sm:w-56">
+                <input type="text" id="filterInput" placeholder="Filter files..." class="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 pl-8 transition" />
+                <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2 text-slate-500 text-xs"></i>
+              </div>
+              <button id="directPathToggleBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium border border-slate-700 transition" title="Direct Path Jump">
+                <i class="fa-regular fa-keyboard"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Direct Path Bar (Hidden collapsible) -->
+          <div id="directPathBar" class="hidden bg-slate-900/90 border border-cardBorder rounded-xl p-2.5 flex items-center gap-2">
+            <span class="text-xs font-mono text-slate-400 pl-2">Jump to:</span>
+            <input type="text" id="directPathInput" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500" placeholder="/var/www/html or /home/user" />
+            <button id="directPathGoBtn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition">Go</button>
+          </div>
+
+          <!-- Explorer Actions Bar -->
+          <div class="flex flex-wrap items-center justify-between gap-3 px-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="newFileBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition">
+                <i class="fa-regular fa-file text-cyan-400"></i>
+                <span>New File</span>
+              </button>
+              <button id="newFolderBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition">
+                <i class="fa-regular fa-folder text-amber-400"></i>
+                <span>New Folder</span>
+              </button>
+              <label for="fileUploadInput" class="cursor-pointer px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition">
+                <i class="fa-solid fa-cloud-arrow-up text-indigo-400"></i>
+                <span>Upload File</span>
+                <input type="file" id="fileUploadInput" class="hidden" multiple />
+              </label>
+            </div>
+            <div class="text-xs text-slate-400 flex items-center gap-3">
+              <span id="directoryItemCount">0 items</span>
+              <span id="directoryTotalSize">0 B</span>
+            </div>
+          </div>
+
+          <!-- Drag and Drop Overlay Zone -->
+          <div id="dropZone" class="bg-cardBg border border-cardBorder rounded-2xl overflow-hidden shadow-2xl relative">
+            <div id="dropOverlay" class="hidden absolute inset-0 bg-indigo-600/20 backdrop-blur-sm border-2 border-dashed border-indigo-400 z-20 flex flex-col items-center justify-center pointer-events-none">
+              <i class="fa-solid fa-cloud-arrow-up text-4xl text-indigo-300 animate-bounce mb-2"></i>
+              <span class="text-sm font-bold text-white">Drop files here to upload to current directory</span>
+            </div>
+
+            <!-- File Table -->
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm">
+                <thead class="bg-slate-900/60 border-b border-cardBorder text-slate-400 text-xs uppercase tracking-wider font-semibold">
+                  <tr>
+                    <th scope="col" class="py-3 px-4 w-12 text-center">Type</th>
+                    <th scope="col" class="py-3 px-4">Name</th>
+                    <th scope="col" class="py-3 px-4 w-28">Size</th>
+                    <th scope="col" class="py-3 px-4 w-28 hidden md:table-cell">Permissions</th>
+                    <th scope="col" class="py-3 px-4 w-40 hidden sm:table-cell">Modified</th>
+                    <th scope="col" class="py-3 px-4 w-36 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="fileTableBody" class="divide-y divide-cardBorder font-mono text-xs">
+                  <!-- File Rows rendered via JS -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Empty Directory Indicator -->
+            <div id="emptyDirIndicator" class="hidden py-16 text-center text-slate-500">
+              <i class="fa-regular fa-folder-open text-4xl mb-3 block"></i>
+              <p class="text-sm font-medium">This folder is empty</p>
+            </div>
+
+            <!-- Loading Spinner Indicator -->
+            <div id="explorerLoading" class="hidden py-16 text-center text-indigo-400">
+              <i class="fa-solid fa-circle-notch fa-spin text-3xl mb-3"></i>
+              <p class="text-xs text-slate-400">Loading directory contents...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW 2: SAVED CONNECTIONS VAULT -->
+      <div id="vaultView" class="hidden space-y-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-xl font-bold text-white">Saved SFTP Connections</h3>
+            <p class="text-xs text-slate-400">Credentials are securely encrypted with AES-256-GCM at rest</p>
+          </div>
+          <button id="vaultAddBtn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition">
+            <i class="fa-solid fa-plus"></i>
+            <span>Add Connection</span>
+          </button>
+        </div>
+
+        <!-- Connections Grid -->
+        <div id="connectionsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <!-- Connection Cards rendered dynamically -->
+        </div>
+
+        <!-- Empty Connections State -->
+        <div id="emptyConnectionsState" class="hidden bg-cardBg border border-cardBorder rounded-2xl p-12 text-center">
+          <div class="w-14 h-14 mx-auto rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 mb-4">
+            <i class="fa-solid fa-vault text-2xl"></i>
+          </div>
+          <h4 class="text-lg font-bold text-white mb-1">No Saved SFTP Accounts</h4>
+          <p class="text-xs text-slate-400 max-w-md mx-auto mb-6">
+            Store your server SFTP host, port, username, and password for fast 1-click access anytime.
+          </p>
+          <button id="emptyAddBtn" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-2 transition">
+            <i class="fa-solid fa-plus"></i>
+            <span>Save Your First Connection</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- MODALS -->
+
+  <!-- 1. Quick Connect Modal -->
+  <div id="quickConnectModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="bg-cardBg border border-cardBorder rounded-2xl w-full max-w-lg p-6 shadow-2xl relative animate-fade-in">
+      <div class="flex items-center justify-between pb-4 border-b border-cardBorder mb-5">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center">
+            <i class="fa-solid fa-bolt"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-white">Quick SFTP Connect</h3>
+            <p class="text-xs text-slate-400">Connect to remote server directly</p>
+          </div>
+        </div>
+        <button class="modal-close text-slate-400 hover:text-white transition">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <form id="quickConnectForm" class="space-y-4">
+        <div class="grid grid-cols-3 gap-3">
+          <div class="col-span-2">
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Host / Address</label>
+            <input type="text" id="qcHost" required placeholder="192.168.1.10 or sftp.domain.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Port</label>
+            <input type="number" id="qcPort" value="22" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Username</label>
+            <input type="text" id="qcUsername" required placeholder="root or ubuntu" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Password</label>
+            <div class="relative">
+              <input type="password" id="qcPassword" placeholder="••••••••" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 pr-9" />
+              <button type="button" class="toggle-password absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300" data-target="qcPassword">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Initial Path (Optional)</label>
+          <input type="text" id="qcPath" placeholder="/ or /var/www" value="/" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500" />
+        </div>
+
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="qcSaveConnection" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-0 cursor-pointer" />
+          <label for="qcSaveConnection" class="text-xs text-slate-300 cursor-pointer">Save this server to my account vault for future 1-click connect</label>
+        </div>
+
+        <div id="qcNameGroup" class="hidden pt-1">
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Saved Name / Label</label>
+          <input type="text" id="qcName" placeholder="e.g. My Production VPS" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500" />
+        </div>
+
+        <div class="pt-3 flex items-center justify-end gap-3 border-t border-cardBorder">
+          <button type="button" class="modal-close px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition">Cancel</button>
+          <button type="submit" id="qcSubmitBtn" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-600/20 flex items-center gap-2 transition">
+            <span>Connect Now</span>
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. Add / Edit Connection Modal -->
+  <div id="connectionModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="bg-cardBg border border-cardBorder rounded-2xl w-full max-w-lg p-6 shadow-2xl relative animate-fade-in">
+      <div class="flex items-center justify-between pb-4 border-b border-cardBorder mb-5">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <i class="fa-solid fa-server"></i>
+          </div>
+          <div>
+            <h3 id="connectionModalTitle" class="font-bold text-white">Save SFTP Connection</h3>
+            <p class="text-xs text-slate-400">Stored safely with AES-256 encryption</p>
+          </div>
+        </div>
+        <button class="modal-close text-slate-400 hover:text-white transition">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <form id="connectionForm" class="space-y-4">
+        <input type="hidden" id="connEditId" value="" />
+        
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Connection Label</label>
+          <input type="text" id="connName" required placeholder="e.g. Production Web, VPS 01, Staging" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div class="col-span-2">
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Host / Address</label>
+            <input type="text" id="connHost" required placeholder="192.168.1.50 or sftp.myserver.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Port</label>
+            <input type="number" id="connPort" value="22" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Username</label>
+            <input type="text" id="connUsername" required placeholder="root or devuser" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Password</label>
+            <div class="relative">
+              <input type="password" id="connPassword" placeholder="••••••••" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 pr-9" />
+              <button type="button" class="toggle-password absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300" data-target="connPassword">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+            <p id="passwordHint" class="hidden text-[10px] text-slate-500 mt-1">Leave empty to keep existing password</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Default Directory</label>
+          <input type="text" id="connDefaultPath" value="/" placeholder="/" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500" />
+        </div>
+
+        <div class="pt-3 flex items-center justify-between border-t border-cardBorder">
+          <button type="button" id="testFormConnBtn" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-plug text-cyan-400"></i>
+            <span>Test Connection</span>
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" class="modal-close px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition">Cancel</button>
+            <button type="submit" id="saveConnSubmitBtn" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 flex items-center gap-1.5 transition">
+              <i class="fa-solid fa-floppy-disk"></i>
+              <span>Save Connection</span>
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. Built-in Code & Text Editor Modal -->
+  <div id="editorModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-2 sm:p-6">
+    <div class="bg-cardBg border border-cardBorder rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl relative overflow-hidden animate-fade-in">
+      <!-- Editor Header -->
+      <div class="flex items-center justify-between px-5 py-3 border-b border-cardBorder bg-slate-900/80">
+        <div class="flex items-center gap-3 overflow-hidden">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-code"></i>
+          </div>
+          <div class="truncate">
+            <div id="editorFileName" class="text-xs font-mono font-bold text-white truncate">file.txt</div>
+            <div id="editorFilePath" class="text-[10px] font-mono text-slate-400 truncate">/path/to/file.txt</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span id="editorStats" class="text-[10px] font-mono text-slate-400 hidden sm:inline mr-2">0 lines</span>
+          <button id="editorSaveBtn" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow transition">
+            <i class="fa-regular fa-floppy-disk"></i>
+            <span>Save (Ctrl+S)</span>
+          </button>
+          <button class="modal-close text-slate-400 hover:text-white p-1.5 rounded-lg transition">
+            <i class="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Editor Textarea Area -->
+      <div class="flex-1 relative flex bg-slate-950 p-2 overflow-hidden">
+        <textarea id="editorContent" spellcheck="false" class="w-full h-full bg-transparent text-slate-200 font-mono text-xs sm:text-sm p-3 resize-none focus:outline-none leading-relaxed selection:bg-indigo-600 selection:text-white"></textarea>
+      </div>
+
+      <!-- Editor Footer -->
+      <div class="px-5 py-2 border-t border-cardBorder bg-slate-900/80 flex items-center justify-between text-[11px] text-slate-400">
+        <div>Encoding: <span class="font-mono text-slate-300">UTF-8</span></div>
+        <div id="editorStatusText">Ready</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. New Item Modal (File or Folder) -->
+  <div id="newItemModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="bg-cardBg border border-cardBorder rounded-2xl w-full max-w-sm p-6 shadow-2xl relative animate-fade-in">
+      <div class="flex items-center justify-between pb-3 border-b border-cardBorder mb-4">
+        <h3 id="newItemTitle" class="font-bold text-white text-sm">Create New</h3>
+        <button class="modal-close text-slate-400 hover:text-white transition">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <form id="newItemForm" class="space-y-4">
+        <input type="hidden" id="newItemType" value="file" />
+        <div>
+          <label id="newItemLabel" class="block text-xs font-semibold text-slate-300 mb-1">Name</label>
+          <input type="text" id="newItemName" required placeholder="Enter name" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono" />
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-cardBorder">
+          <button type="button" class="modal-close px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition">Cancel</button>
+          <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. Rename Modal -->
+  <div id="renameModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="bg-cardBg border border-cardBorder rounded-2xl w-full max-w-sm p-6 shadow-2xl relative animate-fade-in">
+      <div class="flex items-center justify-between pb-3 border-b border-cardBorder mb-4">
+        <h3 class="font-bold text-white text-sm">Rename Item</h3>
+        <button class="modal-close text-slate-400 hover:text-white transition">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <form id="renameForm" class="space-y-4">
+        <input type="hidden" id="renameOldPath" value="" />
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">New Name</label>
+          <input type="text" id="renameNewName" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono" />
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-cardBorder">
+          <button type="button" class="modal-close px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition">Cancel</button>
+          <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition">Rename</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 6. Chmod (Permissions) Modal -->
+  <div id="chmodModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="bg-cardBg border border-cardBorder rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-fade-in">
+      <div class="flex items-center justify-between pb-3 border-b border-cardBorder mb-4">
+        <div>
+          <h3 class="font-bold text-white text-sm">Change Permissions</h3>
+          <p id="chmodPath" class="text-[10px] font-mono text-slate-400 truncate">/path</p>
+        </div>
+        <button class="modal-close text-slate-400 hover:text-white transition">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="chmodForm" class="space-y-4">
+        <input type="hidden" id="chmodTarget" value="" />
+        
+        <div class="grid grid-cols-3 gap-3 text-center text-xs">
+          <div class="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+            <span class="font-bold text-indigo-400 block mb-2">Owner</span>
+            <div class="space-y-1.5 text-left">
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_u_r" class="chmod-box" /> Read (4)</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_u_w" class="chmod-box" /> Write (2)</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_u_x" class="chmod-box" /> Execute (1)</label>
+            </div>
+          </div>
+          <div class="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+            <span class="font-bold text-cyan-400 block mb-2">Group</span>
+            <div class="space-y-1.5 text-left">
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_g_r" class="chmod-box" /> Read (4)</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_g_w" class="chmod-box" /> Write (2)</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_g_x" class="chmod-box" /> Execute (1)</label>
+            </div>
+          </div>
+          <div class="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+            <span class="font-bold text-emerald-400 block mb-2">Public</span>
+            <div class="space-y-1.5 text-left">
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_o_r" class="chmod-box" /> Read (4)</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_o_w" class="chmod-box" /> Write (2)</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="perm_o_x" class="chmod-box" /> Execute (1)</label>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Octal Mode</label>
+          <input type="text" id="chmodOctal" value="755" maxlength="4" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-indigo-400 text-center text-base focus:outline-none focus:border-indigo-500" />
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-cardBorder">
+          <button type="button" class="modal-close px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition">Cancel</button>
+          <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition">Apply Permissions</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 7. Confirm Delete Modal -->
+  <div id="deleteModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="bg-cardBg border border-cardBorder rounded-2xl w-full max-w-sm p-6 shadow-2xl relative animate-fade-in text-center">
+      <div class="w-12 h-12 mx-auto rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mb-3">
+        <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+      </div>
+      <h3 class="font-bold text-white text-base mb-1">Confirm Deletion</h3>
+      <p class="text-xs text-slate-400 mb-3">Are you sure you want to delete this remote item? This action cannot be undone.</p>
+      <div id="deleteTargetName" class="font-mono text-xs text-rose-300 bg-rose-950/40 border border-rose-900/50 rounded-lg p-2 mb-5 truncate">
+        filename
+      </div>
+      <input type="hidden" id="deleteTargetPath" value="" />
+      <input type="hidden" id="deleteTargetIsDir" value="false" />
+
+      <div class="flex items-center justify-center gap-2">
+        <button type="button" class="modal-close flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition">Cancel</button>
+        <button id="confirmDeleteBtn" type="button" class="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-rose-600/20 transition">Delete Permanently</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Script -->
+  <script src="/js/app.js"></script>
+</body>
+</html>
