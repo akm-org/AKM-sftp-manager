@@ -514,3 +514,6 @@ app.post('/api/sftp/delete', authMiddleware, async (req, res) => {
 app.use((req, res) => {
   res.sendFile(path.join(rootDir, 'public', 'index.html'));
 });
+
+export default app;
+
