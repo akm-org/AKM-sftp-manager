@@ -45,18 +45,18 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
     }
 
-    const existing = db.get('SELECT id FROM users WHERE username = ?', [username.trim()]);
+    const existing = await db.get('SELECT id FROM users WHERE username = ?', [username.trim()]);
     if (existing) {
       return res.status(409).json({ error: 'Username is already taken.' });
     }
 
     const passwordHash = await hashPassword(password);
-    db.run(
+    await db.run(
       'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
       [username.trim(), (email || '').trim(), passwordHash]
     );
 
-    const newUser = db.get('SELECT id, username, email, created_at FROM users WHERE username = ?', [username.trim()]);
+    const newUser = await db.get('SELECT id, username, email, created_at FROM users WHERE username = ?', [username.trim()]);
     const token = generateToken(newUser);
 
     return res.status(201).json({
@@ -77,7 +77,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required.' });
     }
 
-    const user = db.get('SELECT * FROM users WHERE username = ?', [username.trim()]);
+    const user = await db.get('SELECT * FROM users WHERE username = ?', [username.trim()]);
     if (!user) {
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
@@ -113,13 +113,14 @@ app.get('/api/config/defaults', (req, res) => {
     defaultHost: config.defaultSftpHost || '',
     defaultPort: config.defaultSftpPort || 22,
     defaultUsername: config.defaultSftpUsername || '',
+    databaseType: config.postgresUrl ? 'supabase_postgres' : 'sqlite',
   });
 });
 
 // --- SAVED CONNECTIONS ROUTES ---
-app.get('/api/connections', authMiddleware, (req, res) => {
+app.get('/api/connections', authMiddleware, async (req, res) => {
   try {
-    const rows = db.query(
+    const rows = await db.query(
       `SELECT id, user_id, name, host, port, username, auth_type, default_path, last_connected_at, created_at, updated_at
        FROM connections WHERE user_id = ? ORDER BY id DESC`,
       [req.user.id]
@@ -143,13 +144,13 @@ app.post('/api/connections', authMiddleware, async (req, res) => {
     const encryptedKey = private_key ? encrypt(private_key) : null;
     const defPath = default_path && default_path.trim() ? default_path.trim() : '/';
 
-    db.run(
+    await db.run(
       `INSERT INTO connections (user_id, name, host, port, username, password_encrypted, auth_type, private_key_encrypted, default_path)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [req.user.id, name.trim(), host.trim(), portNum, username.trim(), encryptedPassword, authType, encryptedKey, defPath]
     );
 
-    const created = db.get(
+    const created = await db.get(
       `SELECT id, user_id, name, host, port, username, auth_type, default_path, created_at
        FROM connections WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
       [req.user.id]
@@ -168,7 +169,7 @@ app.post('/api/connections', authMiddleware, async (req, res) => {
 app.put('/api/connections/:id', authMiddleware, async (req, res) => {
   try {
     const connId = parseInt(req.params.id, 10);
-    const existing = db.get('SELECT * FROM connections WHERE id = ? AND user_id = ?', [connId, req.user.id]);
+    const existing = await db.get('SELECT * FROM connections WHERE id = ? AND user_id = ?', [connId, req.user.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Connection not found.' });
     }
@@ -188,7 +189,7 @@ app.put('/api/connections/:id', authMiddleware, async (req, res) => {
       encKey = encrypt(private_key);
     }
 
-    db.run(
+    await db.run(
       `UPDATE connections
        SET name = ?, host = ?, port = ?, username = ?, password_encrypted = ?, auth_type = ?, private_key_encrypted = ?, default_path = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND user_id = ?`,
@@ -206,7 +207,7 @@ app.put('/api/connections/:id', authMiddleware, async (req, res) => {
       ]
     );
 
-    const updated = db.get(
+    const updated = await db.get(
       `SELECT id, user_id, name, host, port, username, auth_type, default_path, updated_at
        FROM connections WHERE id = ? AND user_id = ?`,
       [connId, req.user.id]
@@ -218,10 +219,10 @@ app.put('/api/connections/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/connections/:id', authMiddleware, (req, res) => {
+app.delete('/api/connections/:id', authMiddleware, async (req, res) => {
   try {
     const connId = parseInt(req.params.id, 10);
-    db.run('DELETE FROM connections WHERE id = ? AND user_id = ?', [connId, req.user.id]);
+    await db.run('DELETE FROM connections WHERE id = ? AND user_id = ?', [connId, req.user.id]);
     return res.json({ message: 'Connection removed successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -233,7 +234,7 @@ app.post('/api/connections/test', authMiddleware, async (req, res) => {
     let { host, port, username, password, private_key, connectionId } = req.body;
 
     if (connectionId) {
-      const conn = db.get('SELECT * FROM connections WHERE id = ? AND user_id = ?', [connectionId, req.user.id]);
+      const conn = await db.get('SELECT * FROM connections WHERE id = ? AND user_id = ?', [connectionId, req.user.id]);
       if (!conn) return res.status(404).json({ error: 'Connection profile not found' });
       host = conn.host;
       port = conn.port;
@@ -268,7 +269,7 @@ app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
     let connectionConfig = null;
 
     if (connectionId) {
-      const conn = db.get('SELECT * FROM connections WHERE id = ? AND user_id = ?', [connectionId, req.user.id]);
+      const conn = await db.get('SELECT * FROM connections WHERE id = ? AND user_id = ?', [connectionId, req.user.id]);
       if (!conn) {
         return res.status(404).json({ error: 'Saved connection not found.' });
       }
@@ -286,7 +287,7 @@ app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
         defaultPath: conn.default_path,
       };
 
-      db.run('UPDATE connections SET last_connected_at = CURRENT_TIMESTAMP WHERE id = ?', [conn.id]);
+      await db.run('UPDATE connections SET last_connected_at = CURRENT_TIMESTAMP WHERE id = ?', [conn.id]);
     } else {
       if (!host || !username) {
         return res.status(400).json({ error: 'Host and username are required.' });
@@ -306,7 +307,7 @@ app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
         try {
           const encPass = password ? encrypt(password) : null;
           const encKey = private_key ? encrypt(private_key) : null;
-          db.run(
+          await db.run(
             `INSERT INTO connections (user_id, name, host, port, username, password_encrypted, auth_type, private_key_encrypted, default_path, last_connected_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
             [req.user.id, (name || host).trim(), host.trim(), connectionConfig.port, username.trim(), encPass, 'password', encKey, connectionConfig.defaultPath]
@@ -516,4 +517,3 @@ app.use((req, res) => {
 });
 
 export default app;
-

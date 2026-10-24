@@ -34,7 +34,7 @@ export class SFTPManager {
 
     // In a serverless environment (like Vercel), the lambda might have restarted.
     // Recover session from database:
-    const row = db.get('SELECT * FROM active_sessions WHERE session_id = ? AND user_id = ?', [sessionId, userId]);
+    const row = await db.get('SELECT * FROM active_sessions WHERE session_id = ? AND user_id = ?', [sessionId, userId]);
     if (!row) {
       throw new Error('SFTP session expired or not found. Please reconnect.');
     }
@@ -80,7 +80,9 @@ export class SFTPManager {
       return session;
     } catch (err) {
       // Remove stale record from database if re-connect fails
-      db.run('DELETE FROM active_sessions WHERE session_id = ?', [sessionId]);
+      try {
+        await db.run('DELETE FROM active_sessions WHERE session_id = ?', [sessionId]);
+      } catch (e) {}
       throw new Error(`Failed to reconnect to SFTP: ${err.message}`);
     }
   }
@@ -192,7 +194,7 @@ export class SFTPManager {
       try {
         const encPass = connectionConfig.password ? encrypt(connectionConfig.password) : null;
         const encKey = connectionConfig.privateKey ? encrypt(connectionConfig.privateKey) : null;
-        db.run(
+        await db.run(
           `INSERT OR REPLACE INTO active_sessions (session_id, user_id, host, port, username, password_encrypted, private_key_encrypted, initial_path, current_path)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [sessionId, userId, connectionConfig.host, connectionConfig.port || 22, connectionConfig.username, encPass, encKey, initialPath, initialPath]
@@ -229,9 +231,9 @@ export class SFTPManager {
 
     try {
       if (userId) {
-        db.run('DELETE FROM active_sessions WHERE session_id = ? AND user_id = ?', [sessionId, userId]);
+        await db.run('DELETE FROM active_sessions WHERE session_id = ? AND user_id = ?', [sessionId, userId]);
       } else {
-        db.run('DELETE FROM active_sessions WHERE session_id = ?', [sessionId]);
+        await db.run('DELETE FROM active_sessions WHERE session_id = ?', [sessionId]);
       }
     } catch (e) {}
 
@@ -248,7 +250,7 @@ export class SFTPManager {
 
       // Update in db
       try {
-        db.run('UPDATE active_sessions SET current_path = ?, last_used_at = CURRENT_TIMESTAMP WHERE session_id = ?', [targetPath, sessionId]);
+        await db.run('UPDATE active_sessions SET current_path = ?, last_used_at = CURRENT_TIMESTAMP WHERE session_id = ?', [targetPath, sessionId]);
       } catch (e) {}
 
       const items = rawList.map((item) => {

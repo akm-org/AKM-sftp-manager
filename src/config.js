@@ -5,7 +5,6 @@ import fs from 'fs';
 
 dotenv.config();
 
-// When running on Vercel, filesystem is read-only except /tmp
 const isVercel = !!process.env.VERCEL;
 const defaultDataDir = isVercel ? '/tmp/data' : path.resolve(process.cwd(), 'data');
 const DATA_DIR = process.env.DATA_DIR || defaultDataDir;
@@ -13,12 +12,9 @@ const DATA_DIR = process.env.DATA_DIR || defaultDataDir;
 if (!fs.existsSync(DATA_DIR)) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch (e) {
-    console.warn('Could not create DATA_DIR:', e.message);
-  }
+  } catch (e) {}
 }
 
-// Generate or load encryption key
 let masterKey = process.env.ENCRYPTION_KEY;
 const keyFile = path.join(DATA_DIR, '.master_key');
 
@@ -43,8 +39,12 @@ export const config = {
   encryptionKey: masterKey || 'fallback_master_encryption_key_32_bytes_long_123',
   dataDir: DATA_DIR,
   dbPath: process.env.DB_PATH || path.join(DATA_DIR, 'sftp_manager.db'),
+  postgresUrl: process.env.POSTGRES_URL || process.env.DATABASE_URL || '',
+  supabaseUrl: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   defaultSftpHost: process.env.DEFAULT_SFTP_HOST || '',
   defaultSftpPort: parseInt(process.env.DEFAULT_SFTP_PORT || '22', 10),
   defaultSftpUsername: process.env.DEFAULT_SFTP_USERNAME || '',
-  sessionTimeoutMs: parseInt(process.env.SESSION_TIMEOUT_MS || '1800000', 10), // 30 minutes
+  sessionTimeoutMs: parseInt(process.env.SESSION_TIMEOUT_MS || '1800000', 10),
 };

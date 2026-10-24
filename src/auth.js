@@ -25,7 +25,7 @@ export function generateToken(user) {
   );
 }
 
-export function authMiddleware(req, res, next) {
+export async function authMiddleware(req, res, next) {
   try {
     let token = null;
 
@@ -40,7 +40,7 @@ export function authMiddleware(req, res, next) {
     }
 
     const decoded = jwt.verify(token, config.jwtSecret);
-    const user = db.get('SELECT id, username, email, created_at FROM users WHERE id = ?', [decoded.id]);
+    const user = await db.get('SELECT id, username, email, created_at FROM users WHERE id = ?', [decoded.id]);
 
     if (!user) {
       return res.status(401).json({ error: 'User no longer exists.' });
