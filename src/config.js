@@ -16,32 +16,13 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const STABLE_ENCRYPTION_KEY = 'akm_sftp_production_master_vault_key_aes256_secure_2026_x99';
-let masterKey = process.env.ENCRYPTION_KEY;
-
-if (!masterKey) {
-  if (isVercel) {
-    masterKey = process.env.JWT_SECRET || STABLE_ENCRYPTION_KEY;
-  } else {
-    const keyFile = path.join(DATA_DIR, '.master_key');
-    if (fs.existsSync(keyFile)) {
-      try {
-        masterKey = fs.readFileSync(keyFile, 'utf8').trim();
-      } catch (e) {}
-    }
-    if (!masterKey) {
-      masterKey = STABLE_ENCRYPTION_KEY;
-      try {
-        fs.writeFileSync(keyFile, masterKey, { mode: 0o600 });
-      } catch (e) {}
-    }
-  }
-}
+const masterKey = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || STABLE_ENCRYPTION_KEY;
 
 export const config = {
   isVercel,
   port: parseInt(process.env.PORT || '3000', 10),
   jwtSecret: process.env.JWT_SECRET || 'akm_sftp_secure_jwt_secret_token_key_2026',
-  encryptionKey: masterKey || STABLE_ENCRYPTION_KEY,
+  encryptionKey: masterKey,
   dataDir: DATA_DIR,
   dbPath: process.env.DB_PATH || path.join(DATA_DIR, 'sftp_manager.db'),
   postgresUrl: process.env.POSTGRES_URL || process.env.DATABASE_URL || '',

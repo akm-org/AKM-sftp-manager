@@ -9,6 +9,7 @@ const IV_LENGTH = 12;
 const CANDIDATE_KEYS = [
   config.encryptionKey,
   'akm_sftp_production_master_vault_key_aes256_secure_2026_x99',
+  '460e430704b4c09f39156db522c908c66fafd67f1dd5373cdde24f55b66716db',
   'akm_sftp_secure_jwt_secret_token_key_2026',
   'fallback_master_encryption_key_32_bytes_long_123',
 ].filter(Boolean);
