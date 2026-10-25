@@ -672,39 +672,49 @@
       const isEditable = !item.isDirectory;
 
       row.innerHTML = `
-        <td class="py-2.5 px-4 text-center shrink-0">${icon}</td>
-        <td class="py-2.5 px-4 text-white font-medium flex items-center gap-2 select-none">
-          <span class="item-name truncate max-w-xs sm:max-w-md">${escapeHtml(item.name)}</span>
-          ${item.isSymlink ? '<i class="fa-solid fa-link text-[10px] text-cyan-400" title="Symlink"></i>' : ''}
+        <td class="py-2.5 px-4 text-center shrink-0 hidden sm:table-cell">${icon}</td>
+        <td class="py-2.5 px-3 sm:px-4 text-white font-medium flex items-center gap-2.5 select-none min-w-0">
+          <div class="sm:hidden shrink-0 flex items-center justify-center w-8 h-8 rounded-xl bg-slate-800/90 text-sm">${icon}</div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <span class="item-name truncate font-medium text-xs sm:text-sm text-slate-100 max-w-[160px] sm:max-w-md">${escapeHtml(item.name)}</span>
+              ${item.isSymlink ? '<i class="fa-solid fa-link text-[10px] text-cyan-400" title="Symlink"></i>' : ''}
+            </div>
+            <div class="sm:hidden text-[10px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+              <span>${item.isDirectory ? 'Directory' : formatBytes(item.size)}</span>
+              <span>•</span>
+              <span class="truncate max-w-[110px]">${modDate}</span>
+            </div>
+          </div>
         </td>
-        <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap">${item.isDirectory ? '-' : formatBytes(item.size)}</td>
+        <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap hidden sm:table-cell">${item.isDirectory ? '-' : formatBytes(item.size)}</td>
         <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap hidden md:table-cell">
           <span class="chmod-link hover:text-indigo-400 transition" title="Click to Chmod">${item.permissions || 'rw-r--r--'}</span>
         </td>
         <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap hidden sm:table-cell text-[11px]">${modDate}</td>
-        <td class="py-2.5 px-4 text-right whitespace-nowrap">
-          <div class="flex items-center justify-end gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+        <td class="py-2.5 px-2 sm:px-4 text-right whitespace-nowrap shrink-0">
+          <div class="flex items-center justify-end gap-1 opacity-90 sm:opacity-70 group-hover:opacity-100 transition-opacity">
             ${
               isEditable
-                ? `<button class="edit-file-btn p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition" title="View & Edit File">
+                ? `<button class="edit-file-btn p-1.5 sm:p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition" title="View & Edit File">
                     <i class="fa-regular fa-pen-to-square"></i>
                    </button>`
                 : ''
             }
             ${
               !item.isDirectory
-                ? `<button class="download-file-btn p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition" title="Download">
+                ? `<button class="download-file-btn p-1.5 sm:p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition" title="Download">
                     <i class="fa-solid fa-download"></i>
                    </button>`
                 : ''
             }
-            <button class="chmod-btn p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition" title="Permissions (chmod)">
+            <button class="chmod-btn p-1.5 sm:p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition hidden sm:inline-flex" title="Permissions (chmod)">
               <i class="fa-solid fa-key"></i>
             </button>
-            <button class="rename-btn p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition" title="Rename">
+            <button class="rename-btn p-1.5 sm:p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition" title="Rename">
               <i class="fa-solid fa-font"></i>
             </button>
-            <button class="delete-btn p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition" title="Delete">
+            <button class="delete-btn p-1.5 sm:p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition" title="Delete">
               <i class="fa-regular fa-trash-can"></i>
             </button>
           </div>
