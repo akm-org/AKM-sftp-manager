@@ -629,10 +629,15 @@
 
   function getFileIcon(item) {
     if (item.isDirectory) {
+      if (item.name.toLowerCase() === 'plugins') {
+        return '<i class="fa-solid fa-cubes text-emerald-400 text-sm" title="Minecraft Plugins Folder"></i>';
+      }
       return '<i class="fa-solid fa-folder text-amber-400 text-sm"></i>';
     }
     const ext = item.name.split('.').pop().toLowerCase();
     switch (ext) {
+      case 'jar':
+        return '<i class="fa-solid fa-cube text-emerald-400 text-sm" title="Minecraft Plugin (.jar)"></i>';
       case 'js':
       case 'mjs':
       case 'cjs':
@@ -724,6 +729,9 @@
           ? `/${item.name}`
           : `${state.currentPath}/${item.name}`;
 
+      const isPluginsDir = item.isDirectory && item.name.toLowerCase() === 'plugins';
+      const isJarPlugin = !item.isDirectory && item.name.toLowerCase().endsWith('.jar');
+
       const icon = getFileIcon(item);
       const modDate = item.modifyTime
         ? new Date(item.modifyTime).toLocaleString()
@@ -731,14 +739,22 @@
 
       const isEditable = !item.isDirectory;
 
+      let pluginBadge = '';
+      if (isPluginsDir) {
+        pluginBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/80 inline-flex items-center gap-1 shadow-sm"><i class="fa-solid fa-cubes text-[9px]"></i> Plugins</span>`;
+      } else if (isJarPlugin) {
+        pluginBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 inline-flex items-center gap-1 shadow-sm"><i class="fa-solid fa-cube text-[9px]"></i> Plugin .jar</span>`;
+      }
+
       row.innerHTML = `
         <td class="py-2.5 px-4 text-center shrink-0 hidden sm:table-cell">${icon}</td>
         <td class="py-2.5 px-3 sm:px-4 text-white font-medium flex items-center gap-2.5 select-none min-w-0">
-          <div class="sm:hidden shrink-0 flex items-center justify-center w-8 h-8 rounded-xl bg-slate-800/90 text-sm">${icon}</div>
+          <div class="sm:hidden shrink-0 flex items-center justify-center w-8 h-8 rounded-xl ${isPluginsDir || isJarPlugin ? 'bg-emerald-950/40 border border-emerald-800/50' : 'bg-slate-800/90'} text-sm">${icon}</div>
           <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5">
-              <span class="item-name truncate font-medium text-xs sm:text-sm text-slate-100 max-w-[160px] sm:max-w-md">${escapeHtml(item.name)}</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="item-name truncate font-medium text-xs sm:text-sm ${isPluginsDir ? 'text-emerald-300 font-semibold' : 'text-slate-100'} max-w-[160px] sm:max-w-md">${escapeHtml(item.name)}</span>
               ${item.isSymlink ? '<i class="fa-solid fa-link text-[10px] text-cyan-400" title="Symlink"></i>' : ''}
+              ${pluginBadge}
             </div>
             <div class="sm:hidden text-[10px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
               <span>${item.isDirectory ? 'Directory' : formatBytes(item.size)}</span>
@@ -754,6 +770,13 @@
         <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap hidden sm:table-cell text-[11px]">${modDate}</td>
         <td class="py-2.5 px-2 sm:px-4 text-right whitespace-nowrap shrink-0">
           <div class="flex items-center justify-end gap-1 opacity-90 sm:opacity-70 group-hover:opacity-100 transition-opacity">
+            ${
+              isPluginsDir
+                ? `<button class="jump-plugins-btn p-1.5 sm:p-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/60 rounded-lg transition" title="Open Minecraft Plugin Manager">
+                    <i class="fa-solid fa-cube"></i>
+                   </button>`
+                : ''
+            }
             ${
               isEditable
                 ? `<button class="edit-file-btn p-1.5 sm:p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition" title="View & Edit File">
@@ -793,6 +816,18 @@
       });
 
       // Actions
+      const jumpPluginsBtn = row.querySelector('.jump-plugins-btn');
+      if (jumpPluginsBtn) {
+        jumpPluginsBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.pluginsTargetDir = fullItemPath;
+          if (el.pluginsTargetDirInput) el.pluginsTargetDirInput.value = fullItemPath;
+          localStorage.setItem('akm_plugins_target_dir', fullItemPath);
+          switchView('plugins');
+          loadInstalledPlugins();
+        });
+      }
+
       const editBtn = row.querySelector('.edit-file-btn');
       if (editBtn) {
         editBtn.addEventListener('click', () => openFileEditor(fullItemPath, item.name));
@@ -1032,7 +1067,16 @@
   if (el.viewPluginsBtn) el.viewPluginsBtn.addEventListener('click', () => switchView('plugins'));
   el.viewVaultBtn.addEventListener('click', () => switchView('vault'));
   if (el.openPluginsFromExplorerBtn) {
-    el.openPluginsFromExplorerBtn.addEventListener('click', () => switchView('plugins'));
+    el.openPluginsFromExplorerBtn.addEventListener('click', () => {
+      if (state.currentPath && (state.currentPath.toLowerCase().endsWith('/plugins') || state.currentPath.toLowerCase() === '/plugins')) {
+        state.pluginsTargetDir = state.currentPath;
+      } else if (state.files && state.files.some(f => f.isDirectory && f.name.toLowerCase() === 'plugins')) {
+        state.pluginsTargetDir = state.currentPath === '/' ? '/plugins' : `${state.currentPath}/plugins`;
+      }
+      if (el.pluginsTargetDirInput) el.pluginsTargetDirInput.value = state.pluginsTargetDir;
+      localStorage.setItem('akm_plugins_target_dir', state.pluginsTargetDir);
+      switchView('plugins');
+    });
   }
 
   document.querySelectorAll('.trigger-vault-switch').forEach((btn) => {
@@ -1138,9 +1182,18 @@
 
       let iconHtml = '';
       if (plugin.iconUrl) {
-        iconHtml = `<img src="${escapeHtml(plugin.iconUrl)}" alt="${escapeHtml(plugin.name)}" class="w-12 h-12 rounded-xl object-contain bg-slate-800 border border-slate-700/60 p-1 shrink-0" onerror="this.onerror=null;this.parentNode.innerHTML='<div class=\\'w-12 h-12 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 flex items-center justify-center shrink-0 text-xl\\'><i class=\\'fa-solid fa-cube\\'></i></div>';" />`;
+        iconHtml = `
+          <div class="w-12 h-12 rounded-xl bg-slate-800/90 border border-slate-700/60 shrink-0 relative overflow-hidden flex items-center justify-center shadow-inner">
+            <img src="${escapeHtml(plugin.iconUrl)}" alt="${escapeHtml(plugin.name)}" referrerpolicy="no-referrer" class="w-full h-full object-contain p-1" onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden');" />
+            <div class="hidden w-full h-full bg-emerald-950/50 text-emerald-400 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-cube"></i>
+            </div>
+          </div>`;
       } else {
-        iconHtml = `<div class="w-12 h-12 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 flex items-center justify-center shrink-0 text-xl"><i class="fa-solid fa-cube"></i></div>`;
+        iconHtml = `
+          <div class="w-12 h-12 rounded-xl bg-emerald-950/50 border border-emerald-800/60 text-emerald-400 flex items-center justify-center shrink-0 text-xl shadow-inner">
+            <i class="fa-solid fa-cube"></i>
+          </div>`;
       }
 
       const downloadsFormatted = typeof plugin.downloads === 'number'

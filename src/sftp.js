@@ -10,6 +10,8 @@ import { encrypt, decrypt } from './crypto.js';
 
 // In-memory cache of active sessions: sessionId -> { type: 'sftp'|'ftp', client, info, lastUsed, timeoutTimer }
 const sessions = new Map();
+// Per-session execution mutex queue to prevent concurrency collisions on sockets (especially FTP)
+const sessionLocks = new Map();
 
 export class SFTPManager {
   static formatPath(p) {
@@ -36,6 +38,30 @@ export class SFTPManager {
       if (session.userId !== userId) {
         throw new Error('Unauthorized access to session.');
       }
+
+      let isDead = false;
+      if (session.protocol === 'ftp') {
+        if (session.client.closed || !session.client.ftp?.socket || session.client.ftp.socket.destroyed) {
+          isDead = true;
+        }
+      } else if (session.protocol === 'sftp') {
+        if (!session.client.sftp || session.client.sftp.destroyed) {
+          isDead = true;
+        }
+      }
+
+      if (isDead) {
+        console.log(`[SFTPManager] Stale/closed client detected for session ${sessionId}, purging and reconnecting.`);
+        try {
+          if (session.protocol === 'ftp') session.client.close();
+          else await session.client.end();
+        } catch (e) {}
+        sessions.delete(sessionId);
+        session = null;
+      }
+    }
+
+    if (session) {
       session.lastUsed = Date.now();
       this.resetSessionTimeout(sessionId);
       return session;
@@ -137,6 +163,56 @@ export class SFTPManager {
       } catch (err) {
         try { await db.run('DELETE FROM active_sessions WHERE session_id = ?', [sessionId]); } catch (e) {}
         throw new Error(`Failed to reconnect to SFTP: ${err.message}`);
+      }
+    }
+  }
+
+  static async runWithLock(sessionId, userId, fn) {
+    if (!sessionId) {
+      throw new Error('Session ID is required');
+    }
+
+    const prevLock = sessionLocks.get(sessionId) || Promise.resolve();
+    let release;
+    const currentLock = new Promise((resolve) => {
+      release = resolve;
+    });
+    const tail = prevLock.then(() => currentLock, () => currentLock);
+    sessionLocks.set(sessionId, tail);
+
+    await prevLock.catch(() => {});
+
+    try {
+      let session = await this.getSession(sessionId, userId);
+
+      try {
+        return await fn(session);
+      } catch (err) {
+        const errMsg = (err && err.message) || '';
+        const isFtpBroken = session.protocol === 'ftp' && (
+          session.client.closed ||
+          errMsg.includes('Client is closed') ||
+          errMsg.includes('another one is still running') ||
+          errMsg.includes('ECONNRESET') ||
+          errMsg.includes('ETIMEDOUT') ||
+          errMsg.includes('Timeout') ||
+          errMsg.includes('unexpected close')
+        );
+
+        if (isFtpBroken) {
+          console.warn(`[SFTPManager] Reconnecting FTP after socket issue (${errMsg})...`);
+          try { session.client.close(); } catch (e) {}
+          sessions.delete(sessionId);
+          session = await this.getSession(sessionId, userId);
+          return await fn(session);
+        }
+
+        throw err;
+      }
+    } finally {
+      release();
+      if (sessionLocks.get(sessionId) === tail) {
+        sessionLocks.delete(sessionId);
       }
     }
   }
@@ -367,6 +443,7 @@ export class SFTPManager {
   }
 
   static async disconnect(sessionId, userId = null) {
+    sessionLocks.delete(sessionId);
     const session = sessions.get(sessionId);
     if (session && userId && session.userId !== userId) {
       throw new Error('Unauthorized access.');
@@ -396,80 +473,81 @@ export class SFTPManager {
   }
 
   static async list(sessionId, userId, remotePath = null) {
-    const session = await this.getSession(sessionId, userId);
-    const targetPath = this.formatPath(remotePath || session.currentPath || '/');
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const targetPath = this.formatPath(remotePath || session.currentPath || '/');
 
-    if (session.protocol === 'ftp') {
-      try {
-        await session.client.cd(targetPath);
-        const rawList = await session.client.list();
-        session.currentPath = targetPath;
-
+      if (session.protocol === 'ftp') {
         try {
-          await db.run('UPDATE active_sessions SET current_path = ?, last_used_at = CURRENT_TIMESTAMP WHERE session_id = ?', [targetPath, sessionId]);
-        } catch (e) {}
+          await session.client.cd(targetPath);
+          const rawList = await session.client.list();
+          session.currentPath = targetPath;
 
-        const items = rawList.map((item) => {
-          const isDir = item.isDirectory;
-          const isSymlink = item.isSymbolicLink;
-          return {
-            name: item.name,
-            type: isDir ? 'd' : (isSymlink ? 'l' : '-'),
-            isDirectory: isDir,
-            isSymlink,
-            size: item.size || 0,
-            modifyTime: item.rawModifiedAt ? new Date(item.rawModifiedAt).getTime() : Date.now(),
-            permissions: item.permissions ? `${item.permissions.user || 'rw'}${item.permissions.group || 'r'}${item.permissions.world || 'r'}` : 'rwxrwxr-x',
-          };
-        });
+          try {
+            await db.run('UPDATE active_sessions SET current_path = ?, last_used_at = CURRENT_TIMESTAMP WHERE session_id = ?', [targetPath, sessionId]);
+          } catch (e) {}
 
-        items.sort((a, b) => {
-          if (a.isDirectory && !b.isDirectory) return -1;
-          if (!a.isDirectory && b.isDirectory) return 1;
-          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-        });
+          const items = rawList.map((item) => {
+            const isDir = item.isDirectory;
+            const isSymlink = item.isSymbolicLink;
+            return {
+              name: item.name,
+              type: isDir ? 'd' : (isSymlink ? 'l' : '-'),
+              isDirectory: isDir,
+              isSymlink,
+              size: item.size || 0,
+              modifyTime: item.rawModifiedAt ? new Date(item.rawModifiedAt).getTime() : Date.now(),
+              permissions: item.permissions ? `${item.permissions.user || 'rw'}${item.permissions.group || 'r'}${item.permissions.world || 'r'}` : 'rwxrwxr-x',
+            };
+          });
 
-        return { path: targetPath, items };
-      } catch (err) {
-        throw new Error(`Failed to list directory '${targetPath}': ${err.message}`);
-      }
-    } else {
-      // SFTP
-      try {
-        const rawList = await session.client.list(targetPath);
-        session.currentPath = targetPath;
+          items.sort((a, b) => {
+            if (a.isDirectory && !b.isDirectory) return -1;
+            if (!a.isDirectory && b.isDirectory) return 1;
+            return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+          });
 
+          return { path: targetPath, items };
+        } catch (err) {
+          throw new Error(`Failed to list directory '${targetPath}': ${err.message}`);
+        }
+      } else {
+        // SFTP
         try {
-          await db.run('UPDATE active_sessions SET current_path = ?, last_used_at = CURRENT_TIMESTAMP WHERE session_id = ?', [targetPath, sessionId]);
-        } catch (e) {}
+          const rawList = await session.client.list(targetPath);
+          session.currentPath = targetPath;
 
-        const items = rawList.map((item) => {
-          const isDir = item.type === 'd';
-          const isSymlink = item.type === 'l';
-          return {
-            name: item.name,
-            type: item.type,
-            isDirectory: isDir,
-            isSymlink,
-            size: item.size || 0,
-            modifyTime: item.modifyTime,
-            accessTime: item.accessTime,
-            rights: item.rights || {},
-            permissions: this.formatRights(item.rights),
-          };
-        });
+          try {
+            await db.run('UPDATE active_sessions SET current_path = ?, last_used_at = CURRENT_TIMESTAMP WHERE session_id = ?', [targetPath, sessionId]);
+          } catch (e) {}
 
-        items.sort((a, b) => {
-          if (a.isDirectory && !b.isDirectory) return -1;
-          if (!a.isDirectory && b.isDirectory) return 1;
-          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-        });
+          const items = rawList.map((item) => {
+            const isDir = item.type === 'd';
+            const isSymlink = item.type === 'l';
+            return {
+              name: item.name,
+              type: item.type,
+              isDirectory: isDir,
+              isSymlink,
+              size: item.size || 0,
+              modifyTime: item.modifyTime,
+              accessTime: item.accessTime,
+              rights: item.rights || {},
+              permissions: this.formatRights(item.rights),
+            };
+          });
 
-        return { path: targetPath, items };
-      } catch (err) {
-        throw new Error(`Failed to list directory '${targetPath}': ${err.message}`);
+          items.sort((a, b) => {
+            if (a.isDirectory && !b.isDirectory) return -1;
+            if (!a.isDirectory && b.isDirectory) return 1;
+            return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+          });
+
+          return { path: targetPath, items };
+        } catch (err) {
+          throw new Error(`Failed to list directory '${targetPath}': ${err.message}`);
+        }
       }
-    }
+    });
   }
 
   static formatRights(rights) {
@@ -481,274 +559,277 @@ export class SFTPManager {
   }
 
   static async readFile(sessionId, userId, remoteFilePath) {
-    const session = await this.getSession(sessionId, userId);
-    const formatted = this.formatPath(remoteFilePath);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const formatted = this.formatPath(remoteFilePath);
 
-    if (session.protocol === 'ftp') {
-      try {
-        const chunks = [];
-        const writable = new Writable({
-          write(chunk, enc, cb) {
-            chunks.push(chunk);
-            cb();
-          },
-        });
-        await session.client.downloadTo(writable, formatted);
-        const buffer = Buffer.concat(chunks);
-        return {
-          path: formatted,
-          content: buffer.toString('utf8'),
-          size: buffer.length,
-        };
-      } catch (err) {
-        throw new Error(`Failed to read file '${formatted}': ${err.message}`);
+      if (session.protocol === 'ftp') {
+        try {
+          const chunks = [];
+          const writable = new Writable({
+            write(chunk, enc, cb) {
+              chunks.push(chunk);
+              cb();
+            },
+          });
+          await session.client.downloadTo(writable, formatted);
+          const buffer = Buffer.concat(chunks);
+          return {
+            path: formatted,
+            content: buffer.toString('utf8'),
+            size: buffer.length,
+          };
+        } catch (err) {
+          throw new Error(`Failed to read file '${formatted}': ${err.message}`);
+        }
+      } else {
+        try {
+          const buffer = await session.client.get(formatted);
+          return {
+            path: formatted,
+            content: buffer.toString('utf8'),
+            size: buffer.length,
+          };
+        } catch (err) {
+          throw new Error(`Failed to read file '${formatted}': ${err.message}`);
+        }
       }
-    } else {
-      try {
-        const buffer = await session.client.get(formatted);
-        return {
-          path: formatted,
-          content: buffer.toString('utf8'),
-          size: buffer.length,
-        };
-      } catch (err) {
-        throw new Error(`Failed to read file '${formatted}': ${err.message}`);
-      }
-    }
+    });
   }
 
   static async writeFile(sessionId, userId, remoteFilePath, content) {
-    const session = await this.getSession(sessionId, userId);
-    const formatted = this.formatPath(remoteFilePath);
-    const buffer = Buffer.from(content, 'utf8');
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const formatted = this.formatPath(remoteFilePath);
+      const buffer = Buffer.from(content, 'utf8');
 
-    if (session.protocol === 'ftp') {
-      try {
-        const readable = Readable.from(buffer);
-        await session.client.uploadFrom(readable, formatted);
-        return { success: true, path: formatted, size: buffer.length };
-      } catch (err) {
-        throw new Error(`Failed to write file '${formatted}': ${err.message}`);
+      if (session.protocol === 'ftp') {
+        try {
+          const readable = Readable.from(buffer);
+          await session.client.uploadFrom(readable, formatted);
+          return { success: true, path: formatted, size: buffer.length };
+        } catch (err) {
+          throw new Error(`Failed to write file '${formatted}': ${err.message}`);
+        }
+      } else {
+        try {
+          await session.client.put(buffer, formatted);
+          return { success: true, path: formatted, size: buffer.length };
+        } catch (err) {
+          throw new Error(`Failed to write file '${formatted}': ${err.message}`);
+        }
       }
-    } else {
-      try {
-        await session.client.put(buffer, formatted);
-        return { success: true, path: formatted, size: buffer.length };
-      } catch (err) {
-        throw new Error(`Failed to write file '${formatted}': ${err.message}`);
-      }
-    }
+    });
   }
 
   static async downloadFile(sessionId, userId, remoteFilePath) {
-    const session = await this.getSession(sessionId, userId);
-    const formatted = this.formatPath(remoteFilePath);
-    const filename = path.posix.basename(formatted);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const formatted = this.formatPath(remoteFilePath);
+      const filename = path.posix.basename(formatted);
 
-    if (session.protocol === 'ftp') {
-      try {
-        const chunks = [];
-        const writable = new Writable({
-          write(chunk, enc, cb) {
-            chunks.push(chunk);
-            cb();
-          },
-        });
-        await session.client.downloadTo(writable, formatted);
-        const buffer = Buffer.concat(chunks);
-        return { buffer, filename, size: buffer.length };
-      } catch (err) {
-        throw new Error(`Failed to download file '${formatted}': ${err.message}`);
+      if (session.protocol === 'ftp') {
+        try {
+          const chunks = [];
+          const writable = new Writable({
+            write(chunk, enc, cb) {
+              chunks.push(chunk);
+              cb();
+            },
+          });
+          await session.client.downloadTo(writable, formatted);
+          const buffer = Buffer.concat(chunks);
+          return { buffer, filename, size: buffer.length };
+        } catch (err) {
+          throw new Error(`Failed to download file '${formatted}': ${err.message}`);
+        }
+      } else {
+        try {
+          const buffer = await session.client.get(formatted);
+          return { buffer, filename, size: buffer.length };
+        } catch (err) {
+          throw new Error(`Failed to download file '${formatted}': ${err.message}`);
+        }
       }
-    } else {
-      try {
-        const buffer = await session.client.get(formatted);
-        return { buffer, filename, size: buffer.length };
-      } catch (err) {
-        throw new Error(`Failed to download file '${formatted}': ${err.message}`);
-      }
-    }
+    });
   }
 
   static async uploadFile(sessionId, userId, localFilePath, remoteDirPath, originalFilename) {
-    const session = await this.getSession(sessionId, userId);
-    const dir = this.formatPath(remoteDirPath);
-    const remoteDest = path.posix.join(dir, originalFilename);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const dir = this.formatPath(remoteDirPath);
+      const remoteDest = path.posix.join(dir, originalFilename);
 
-    if (session.protocol === 'ftp') {
-      try {
-        await session.client.uploadFrom(localFilePath, remoteDest);
-        return { success: true, path: remoteDest, name: originalFilename };
-      } catch (err) {
-        throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
-      }
-    } else {
-      try {
-        await session.client.fastPut(localFilePath, remoteDest);
-        return { success: true, path: remoteDest, name: originalFilename };
-      } catch (err) {
+      if (session.protocol === 'ftp') {
         try {
-          const fileData = fs.readFileSync(localFilePath);
-          await session.client.put(fileData, remoteDest);
+          try { await session.client.ensureDir(dir); } catch (e) {}
+          await session.client.uploadFrom(localFilePath, remoteDest);
           return { success: true, path: remoteDest, name: originalFilename };
-        } catch (innerErr) {
-          throw new Error(`Failed to upload to '${remoteDest}': ${innerErr.message}`);
+        } catch (err) {
+          throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
+        }
+      } else {
+        try {
+          try { await session.client.mkdir(dir, true); } catch (e) {}
+          await session.client.fastPut(localFilePath, remoteDest);
+          return { success: true, path: remoteDest, name: originalFilename };
+        } catch (err) {
+          try {
+            const fileData = fs.readFileSync(localFilePath);
+            await session.client.put(fileData, remoteDest);
+            return { success: true, path: remoteDest, name: originalFilename };
+          } catch (innerErr) {
+            throw new Error(`Failed to upload to '${remoteDest}': ${innerErr.message}`);
+          }
         }
       }
-    }
+    });
   }
 
   static async uploadBuffer(sessionId, userId, buffer, remoteDirPath, originalFilename) {
-    const session = await this.getSession(sessionId, userId);
-    const dir = this.formatPath(remoteDirPath);
-    const remoteDest = path.posix.join(dir, originalFilename);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const dir = this.formatPath(remoteDirPath);
+      const remoteDest = path.posix.join(dir, originalFilename);
 
-    // Ensure target remote directory exists
-    try {
       if (session.protocol === 'ftp') {
-        await session.client.ensureDir(dir);
+        try {
+          try { await session.client.ensureDir(dir); } catch (e) {}
+          const readable = Readable.from(buffer);
+          await session.client.uploadFrom(readable, remoteDest);
+          return { success: true, path: remoteDest, name: originalFilename, size: buffer.length };
+        } catch (err) {
+          throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
+        }
       } else {
-        await session.client.mkdir(dir, true);
+        try {
+          try { await session.client.mkdir(dir, true); } catch (e) {}
+          await session.client.put(buffer, remoteDest);
+          return { success: true, path: remoteDest, name: originalFilename, size: buffer.length };
+        } catch (err) {
+          throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
+        }
       }
-    } catch (e) {
-      // Ignore if dir already exists
-    }
-
-    if (session.protocol === 'ftp') {
-      try {
-        const readable = Readable.from(buffer);
-        await session.client.uploadFrom(readable, remoteDest);
-        return { success: true, path: remoteDest, name: originalFilename, size: buffer.length };
-      } catch (err) {
-        throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
-      }
-    } else {
-      try {
-        await session.client.put(buffer, remoteDest);
-        return { success: true, path: remoteDest, name: originalFilename, size: buffer.length };
-      } catch (err) {
-        throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
-      }
-    }
+    });
   }
 
   static async mkdir(sessionId, userId, remoteDirPath) {
-    const session = await this.getSession(sessionId, userId);
-    const formatted = this.formatPath(remoteDirPath);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const formatted = this.formatPath(remoteDirPath);
 
-    if (session.protocol === 'ftp') {
-      try {
-        await session.client.ensureDir(formatted);
-        return { success: true, path: formatted };
-      } catch (err) {
-        throw new Error(`Failed to create directory '${formatted}': ${err.message}`);
+      if (session.protocol === 'ftp') {
+        try {
+          await session.client.ensureDir(formatted);
+          return { success: true, path: formatted };
+        } catch (err) {
+          throw new Error(`Failed to create directory '${formatted}': ${err.message}`);
+        }
+      } else {
+        try {
+          await session.client.mkdir(formatted, true);
+          return { success: true, path: formatted };
+        } catch (err) {
+          throw new Error(`Failed to create directory '${formatted}': ${err.message}`);
+        }
       }
-    } else {
-      try {
-        await session.client.mkdir(formatted, true);
-        return { success: true, path: formatted };
-      } catch (err) {
-        throw new Error(`Failed to create directory '${formatted}': ${err.message}`);
-      }
-    }
+    });
   }
 
   static async createFile(sessionId, userId, remoteFilePath) {
-    const session = await this.getSession(sessionId, userId);
-    const formatted = this.formatPath(remoteFilePath);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const formatted = this.formatPath(remoteFilePath);
 
-    if (session.protocol === 'ftp') {
-      try {
-        const readable = Readable.from(Buffer.from(''));
-        await session.client.uploadFrom(readable, formatted);
-        return { success: true, path: formatted };
-      } catch (err) {
-        throw new Error(`Failed to create file '${formatted}': ${err.message}`);
+      if (session.protocol === 'ftp') {
+        try {
+          const readable = Readable.from(Buffer.from(''));
+          await session.client.uploadFrom(readable, formatted);
+          return { success: true, path: formatted };
+        } catch (err) {
+          throw new Error(`Failed to create file '${formatted}': ${err.message}`);
+        }
+      } else {
+        try {
+          await session.client.put(Buffer.from(''), formatted);
+          return { success: true, path: formatted };
+        } catch (err) {
+          throw new Error(`Failed to create empty file '${formatted}': ${err.message}`);
+        }
       }
-    } else {
-      try {
-        await session.client.put(Buffer.from(''), formatted);
-        return { success: true, path: formatted };
-      } catch (err) {
-        throw new Error(`Failed to create empty file '${formatted}': ${err.message}`);
-      }
-    }
+    });
   }
 
   static async rename(sessionId, userId, oldPath, newPath) {
-    const session = await this.getSession(sessionId, userId);
-    const fromPath = this.formatPath(oldPath);
-    const toPath = this.formatPath(newPath);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const fromPath = this.formatPath(oldPath);
+      const toPath = this.formatPath(newPath);
 
-    try {
-      await session.client.rename(fromPath, toPath);
-      return { success: true, oldPath: fromPath, newPath: toPath };
-    } catch (err) {
-      throw new Error(`Failed to rename '${fromPath}' to '${toPath}': ${err.message}`);
-    }
+      try {
+        await session.client.rename(fromPath, toPath);
+        return { success: true, oldPath: fromPath, newPath: toPath };
+      } catch (err) {
+        throw new Error(`Failed to rename '${fromPath}' to '${toPath}': ${err.message}`);
+      }
+    });
   }
 
   static async chmod(sessionId, userId, remotePath, mode) {
-    const session = await this.getSession(sessionId, userId);
-    const formatted = this.formatPath(remotePath);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const formatted = this.formatPath(remotePath);
 
-    if (session.protocol === 'ftp') {
-      try {
-        await session.client.send(`SITE CHMOD ${mode} ${formatted}`);
-        return { success: true, path: formatted, mode };
-      } catch (err) {
-        return { success: true, path: formatted, mode, note: 'CHMOD command sent' };
+      if (session.protocol === 'ftp') {
+        try {
+          await session.client.send(`SITE CHMOD ${mode} ${formatted}`);
+          return { success: true, path: formatted, mode };
+        } catch (err) {
+          return { success: true, path: formatted, mode, note: 'CHMOD command sent' };
+        }
+      } else {
+        try {
+          const octalMode = parseInt(mode, 8);
+          await session.client.chmod(formatted, octalMode);
+          return { success: true, path: formatted, mode };
+        } catch (err) {
+          throw new Error(`Failed to chmod '${formatted}' to ${mode}: ${err.message}`);
+        }
       }
-    } else {
-      try {
-        const octalMode = parseInt(mode, 8);
-        await session.client.chmod(formatted, octalMode);
-        return { success: true, path: formatted, mode };
-      } catch (err) {
-        throw new Error(`Failed to chmod '${formatted}' to ${mode}: ${err.message}`);
-      }
-    }
+    });
   }
 
   static async delete(sessionId, userId, remotePath, isDirectory = false) {
-    const session = await this.getSession(sessionId, userId);
-    const formatted = this.formatPath(remotePath);
+    return this.runWithLock(sessionId, userId, async (session) => {
+      const formatted = this.formatPath(remotePath);
 
-    if (session.protocol === 'ftp') {
-      try {
-        if (isDirectory) {
-          await session.client.removeDir(formatted);
-        } else {
-          await session.client.remove(formatted);
-        }
-        return { success: true, path: formatted };
-      } catch (err) {
+      if (session.protocol === 'ftp') {
         try {
-          if (!isDirectory) {
+          if (isDirectory) {
             await session.client.removeDir(formatted);
-            return { success: true, path: formatted };
+          } else {
+            await session.client.remove(formatted);
           }
-        } catch (e) {}
-        throw new Error(`Failed to delete '${formatted}': ${err.message}`);
-      }
-    } else {
-      try {
-        if (isDirectory) {
-          await session.client.rmdir(formatted, true);
-        } else {
-          await session.client.delete(formatted);
+          return { success: true, path: formatted };
+        } catch (err) {
+          try {
+            if (!isDirectory) {
+              await session.client.removeDir(formatted);
+              return { success: true, path: formatted };
+            }
+          } catch (e) {}
+          throw new Error(`Failed to delete '${formatted}': ${err.message}`);
         }
-        return { success: true, path: formatted };
-      } catch (err) {
+      } else {
         try {
-          if (!isDirectory) {
+          if (isDirectory) {
             await session.client.rmdir(formatted, true);
-            return { success: true, path: formatted };
+          } else {
+            await session.client.delete(formatted);
           }
-        } catch (e) {}
-        throw new Error(`Failed to delete '${formatted}': ${err.message}`);
+          return { success: true, path: formatted };
+        } catch (err) {
+          try {
+            if (!isDirectory) {
+              await session.client.rmdir(formatted, true);
+              return { success: true, path: formatted };
+            }
+          } catch (e) {}
+          throw new Error(`Failed to delete '${formatted}': ${err.message}`);
+        }
       }
-    }
+    });
   }
 
   static async getActiveSession(sessionId, userId) {

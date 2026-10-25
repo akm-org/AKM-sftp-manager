@@ -739,10 +739,10 @@ app.get('/api/plugins/search', authMiddleware, async (req, res) => {
           if (Array.isArray(sData)) {
             for (const item of sData) {
               let iconUrl = null;
-              if (item.icon?.url) {
-                iconUrl = item.icon.url.startsWith('http') ? item.icon.url : 'https://www.spigotmc.org/' + item.icon.url;
-              } else if (item.icon?.data) {
+              if (item.icon?.data) {
                 iconUrl = `data:image/png;base64,${item.icon.data}`;
+              } else if (item.icon?.url) {
+                iconUrl = item.icon.url.startsWith('http') ? item.icon.url : 'https://www.spigotmc.org/' + item.icon.url;
               }
 
               results.push({
