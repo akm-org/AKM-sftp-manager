@@ -242,8 +242,21 @@ app.post('/api/connections/test', authMiddleware, async (req, res) => {
       host = conn.host;
       port = conn.port;
       username = conn.username;
-      password = conn.password_encrypted ? decrypt(conn.password_encrypted) : '';
-      private_key = conn.private_key_encrypted ? decrypt(conn.private_key_encrypted) : '';
+      if (!password && conn.password_encrypted) {
+        try {
+          password = decrypt(conn.password_encrypted);
+        } catch (decErr) {
+          return res.status(400).json({
+            success: false,
+            error: 'Stored password could not be decrypted. Please click Edit on this connection, enter your password, and click Save.',
+          });
+        }
+      }
+      if (!private_key && conn.private_key_encrypted) {
+        try {
+          private_key = decrypt(conn.private_key_encrypted);
+        } catch (e) {}
+      }
       if (!protocol) protocol = conn.auth_type;
     }
 
@@ -279,8 +292,31 @@ app.post('/api/sftp/connect', authMiddleware, async (req, res) => {
         return res.status(404).json({ error: 'Saved connection not found.' });
       }
 
-      const decryptedPassword = conn.password_encrypted ? decrypt(conn.password_encrypted) : '';
-      const decryptedKey = conn.private_key_encrypted ? decrypt(conn.private_key_encrypted) : '';
+      let decryptedPassword = '';
+      if (password) {
+        decryptedPassword = password;
+        // Auto-update encrypted password with current master key
+        try {
+          await db.run('UPDATE connections SET password_encrypted = ? WHERE id = ?', [encrypt(password), conn.id]);
+        } catch (e) {}
+      } else if (conn.password_encrypted) {
+        try {
+          decryptedPassword = decrypt(conn.password_encrypted);
+        } catch (decErr) {
+          return res.status(400).json({
+            error: 'Stored password could not be decrypted. Please click Edit on this connection, enter your password, and click Save.',
+          });
+        }
+      }
+
+      let decryptedKey = '';
+      if (private_key) {
+        decryptedKey = private_key;
+      } else if (conn.private_key_encrypted) {
+        try {
+          decryptedKey = decrypt(conn.private_key_encrypted);
+        } catch (e) {}
+      }
 
       connectionConfig = {
         name: conn.name,

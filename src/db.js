@@ -268,9 +268,19 @@ class UniversalDatabase {
       if (params.length > 9 && params[9]) {
         connObj.plugins_path = params[9];
       }
-      const { data, error } = await this.supabase.from('connections').insert(connObj).select().single();
-      if (error) throw error;
-      return data;
+      try {
+        const { data, error } = await this.supabase.from('connections').insert(connObj).select().single();
+        if (error) throw error;
+        return data;
+      } catch (err) {
+        if (connObj.plugins_path && err.message && err.message.includes('plugins_path')) {
+          delete connObj.plugins_path;
+          const { data, error } = await this.supabase.from('connections').insert(connObj).select().single();
+          if (error) throw error;
+          return data;
+        }
+        throw err;
+      }
     }
     if (sql.includes('UPDATE connections')) {
       const updateObj = {
@@ -290,9 +300,19 @@ class UniversalDatabase {
         idParam = params[9];
         userParam = params[10];
       }
-      const { error } = await this.supabase.from('connections').update(updateObj).eq('id', idParam).eq('user_id', userParam);
-      if (error) throw error;
-      return { success: true };
+      try {
+        const { error } = await this.supabase.from('connections').update(updateObj).eq('id', idParam).eq('user_id', userParam);
+        if (error) throw error;
+        return { success: true };
+      } catch (err) {
+        if (updateObj.plugins_path && err.message && err.message.includes('plugins_path')) {
+          delete updateObj.plugins_path;
+          const { error } = await this.supabase.from('connections').update(updateObj).eq('id', idParam).eq('user_id', userParam);
+          if (error) throw error;
+          return { success: true };
+        }
+        throw err;
+      }
     }
     if (sql.includes('DELETE FROM connections')) {
       const { error } = await this.supabase.from('connections').delete().eq('id', params[0]).eq('user_id', params[1]);

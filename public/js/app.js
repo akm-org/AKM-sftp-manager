@@ -521,6 +521,14 @@
       loadDirectory(res.info.initialPath || '/');
       loadConnections();
     } catch (err) {
+      if (err.message && err.message.includes('Stored password could not be decrypted')) {
+        const found = state.connections.find((c) => c.id === connectionId);
+        if (found) {
+          openEditConnectionModal(found);
+          showToast('Please re-enter your password once and click Save Connection.', 'warning');
+          return;
+        }
+      }
       showToast('Connection failed: ' + err.message, 'error');
     }
   }
@@ -1629,6 +1637,14 @@
       loadDirectory(res.info.initialPath || '/');
       if (saveConnection) loadConnections();
     } catch (err) {
+      if (err.message && err.message.includes('Stored password could not be decrypted')) {
+        const found = state.connections.find((c) => c.id === connectionId);
+        if (found) {
+          openEditConnectionModal(found);
+          showToast('Please re-enter your password once and click Save Connection.', 'warning');
+          return;
+        }
+      }
       showToast('Connection failed: ' + err.message, 'error');
     }
   });
