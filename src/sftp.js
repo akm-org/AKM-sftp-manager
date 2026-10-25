@@ -598,6 +598,40 @@ export class SFTPManager {
     }
   }
 
+  static async uploadBuffer(sessionId, userId, buffer, remoteDirPath, originalFilename) {
+    const session = await this.getSession(sessionId, userId);
+    const dir = this.formatPath(remoteDirPath);
+    const remoteDest = path.posix.join(dir, originalFilename);
+
+    // Ensure target remote directory exists
+    try {
+      if (session.protocol === 'ftp') {
+        await session.client.ensureDir(dir);
+      } else {
+        await session.client.mkdir(dir, true);
+      }
+    } catch (e) {
+      // Ignore if dir already exists
+    }
+
+    if (session.protocol === 'ftp') {
+      try {
+        const readable = Readable.from(buffer);
+        await session.client.uploadFrom(readable, remoteDest);
+        return { success: true, path: remoteDest, name: originalFilename, size: buffer.length };
+      } catch (err) {
+        throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
+      }
+    } else {
+      try {
+        await session.client.put(buffer, remoteDest);
+        return { success: true, path: remoteDest, name: originalFilename, size: buffer.length };
+      } catch (err) {
+        throw new Error(`Failed to upload to '${remoteDest}': ${err.message}`);
+      }
+    }
+  }
+
   static async mkdir(sessionId, userId, remoteDirPath) {
     const session = await this.getSession(sessionId, userId);
     const formatted = this.formatPath(remoteDirPath);

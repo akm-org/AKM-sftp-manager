@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS public.connections (
   auth_type TEXT NOT NULL DEFAULT 'password',
   private_key_encrypted TEXT,
   default_path TEXT DEFAULT '/',
+  plugins_path TEXT DEFAULT '/plugins',
   last_connected_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

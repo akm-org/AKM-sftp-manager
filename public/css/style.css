@@ -208,6 +208,17 @@ input, select, textarea, button {
   .touch-action-btn {
     min-height: 44px;
   }
+
+  /* Plugins view mobile optimization */
+  #pluginCardsGrid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .cat-pill {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.75rem !important;
+    touch-action: manipulation;
+  }
 }
 
 /* Toast Styles */

@@ -100,6 +100,7 @@ class UniversalDatabase {
         auth_type VARCHAR(50) NOT NULL DEFAULT 'password',
         private_key_encrypted TEXT,
         default_path TEXT DEFAULT '/',
+        plugins_path VARCHAR(255) DEFAULT '/plugins',
         last_connected_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -122,6 +123,9 @@ class UniversalDatabase {
       CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON active_sessions(user_id);
     `;
     await this.pgPool.query(sql);
+    try {
+      await this.pgPool.query("ALTER TABLE connections ADD COLUMN IF NOT EXISTS plugins_path VARCHAR(255) DEFAULT '/plugins'");
+    } catch (e) {}
   }
 
   initSqliteSchema() {
@@ -145,6 +149,7 @@ class UniversalDatabase {
         auth_type TEXT NOT NULL DEFAULT 'password',
         private_key_encrypted TEXT,
         default_path TEXT DEFAULT '/',
+        plugins_path TEXT DEFAULT '/plugins',
         last_connected_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -171,8 +176,10 @@ class UniversalDatabase {
 
     if (typeof this.sqliteDb.run === 'function' && typeof Bun !== 'undefined') {
       this.sqliteDb.run(sql);
+      try { this.sqliteDb.run("ALTER TABLE connections ADD COLUMN plugins_path TEXT DEFAULT '/plugins'"); } catch (e) {}
     } else {
       this.sqliteDb.exec(sql);
+      try { this.sqliteDb.exec("ALTER TABLE connections ADD COLUMN plugins_path TEXT DEFAULT '/plugins'"); } catch (e) {}
     }
   }
 
@@ -247,7 +254,7 @@ class UniversalDatabase {
       return data;
     }
     if (sql.includes('INSERT INTO connections')) {
-      const { data, error } = await this.supabase.from('connections').insert({
+      const connObj = {
         user_id: params[0],
         name: params[1],
         host: params[2],
@@ -257,12 +264,16 @@ class UniversalDatabase {
         auth_type: params[6],
         private_key_encrypted: params[7],
         default_path: params[8],
-      }).select().single();
+      };
+      if (params.length > 9 && params[9]) {
+        connObj.plugins_path = params[9];
+      }
+      const { data, error } = await this.supabase.from('connections').insert(connObj).select().single();
       if (error) throw error;
       return data;
     }
     if (sql.includes('UPDATE connections')) {
-      const { error } = await this.supabase.from('connections').update({
+      const updateObj = {
         name: params[0],
         host: params[1],
         port: params[2],
@@ -271,7 +282,15 @@ class UniversalDatabase {
         auth_type: params[5],
         private_key_encrypted: params[6],
         default_path: params[7],
-      }).eq('id', params[8]).eq('user_id', params[9]);
+      };
+      let idParam = params[8];
+      let userParam = params[9];
+      if (params.length > 10) {
+        updateObj.plugins_path = params[8];
+        idParam = params[9];
+        userParam = params[10];
+      }
+      const { error } = await this.supabase.from('connections').update(updateObj).eq('id', idParam).eq('user_id', userParam);
       if (error) throw error;
       return { success: true };
     }

@@ -13,6 +13,12 @@
     connections: [],
     filterQuery: '',
     editorFilePath: null,
+    pluginsTargetDir: localStorage.getItem('akm_plugins_target_dir') || '/plugins',
+    pluginsList: [],
+    installedPlugins: [],
+    pluginQuery: '',
+    pluginSource: 'all',
+    isPluginsLoaded: false,
   };
 
   // --- DOM ELEMENTS ---
@@ -42,14 +48,44 @@
 
     // Views
     viewFilesBtn: document.getElementById('viewFilesBtn'),
+    viewPluginsBtn: document.getElementById('viewPluginsBtn'),
     viewVaultBtn: document.getElementById('viewVaultBtn'),
     fileExplorerView: document.getElementById('fileExplorerView'),
+    pluginsView: document.getElementById('pluginsView'),
     vaultView: document.getElementById('vaultView'),
+    pluginsBadgeCount: document.getElementById('pluginsBadgeCount'),
     vaultBadgeCount: document.getElementById('vaultBadgeCount'),
     notConnectedBanner: document.getElementById('notConnectedBanner'),
     explorerContainer: document.getElementById('explorerContainer'),
     connectionsGrid: document.getElementById('connectionsGrid'),
     emptyConnectionsState: document.getElementById('emptyConnectionsState'),
+    openPluginsFromExplorerBtn: document.getElementById('openPluginsFromExplorerBtn'),
+
+    // Plugins Manager UI
+    pluginsServerStatus: document.getElementById('pluginsServerStatus'),
+    pluginsTargetDirInput: document.getElementById('pluginsTargetDirInput'),
+    savePluginsTargetDirBtn: document.getElementById('savePluginsTargetDirBtn'),
+    autoDetectPluginsDirBtn: document.getElementById('autoDetectPluginsDirBtn'),
+    subTabBrowseBtn: document.getElementById('subTabBrowseBtn'),
+    subTabInstalledBtn: document.getElementById('subTabInstalledBtn'),
+    browsePluginsSection: document.getElementById('browsePluginsSection'),
+    installedPluginsSection: document.getElementById('installedPluginsSection'),
+    installedCountBadge: document.getElementById('installedCountBadge'),
+    refreshPluginsBtn: document.getElementById('refreshPluginsBtn'),
+    pluginUploadInput: document.getElementById('pluginUploadInput'),
+    pluginSearchInput: document.getElementById('pluginSearchInput'),
+    pluginSourceSelect: document.getElementById('pluginSourceSelect'),
+    pluginSearchSubmitBtn: document.getElementById('pluginSearchSubmitBtn'),
+    pluginCardsGrid: document.getElementById('pluginCardsGrid'),
+    pluginsLoading: document.getElementById('pluginsLoading'),
+    pluginsEmptyState: document.getElementById('pluginsEmptyState'),
+    installedPluginsList: document.getElementById('installedPluginsList'),
+    installedLoading: document.getElementById('installedLoading'),
+    noInstalledPlugins: document.getElementById('noInstalledPlugins'),
+    installedSummaryBadge: document.getElementById('installedSummaryBadge'),
+    installedLocationText: document.getElementById('installedLocationText'),
+    openPluginsInExplorerBtn: document.getElementById('openPluginsInExplorerBtn'),
+    gotoBrowseBtn: document.getElementById('gotoBrowseBtn'),
 
     // Explorer UI
     breadcrumbsList: document.getElementById('breadcrumbsList'),
@@ -101,6 +137,7 @@
     connUsername: document.getElementById('connUsername'),
     connPassword: document.getElementById('connPassword'),
     connDefaultPath: document.getElementById('connDefaultPath'),
+    connPluginsPath: document.getElementById('connPluginsPath'),
     passwordHint: document.getElementById('passwordHint'),
     testFormConnBtn: document.getElementById('testFormConnBtn'),
 
@@ -293,6 +330,15 @@
 
       el.notConnectedBanner.classList.add('hidden');
       el.explorerContainer.classList.remove('hidden');
+
+      if (el.pluginsServerStatus) {
+        el.pluginsServerStatus.innerHTML = `Target Server: <span class="text-emerald-400 font-semibold">${info.username}@${info.host}:${info.port}</span> <span class="text-[10px] text-slate-500 font-mono uppercase">(${(info.protocol || 'sftp').toUpperCase()})</span>`;
+      }
+
+      if (info.pluginsPath) {
+        state.pluginsTargetDir = info.pluginsPath;
+        if (el.pluginsTargetDirInput) el.pluginsTargetDirInput.value = info.pluginsPath;
+      }
     } else {
       el.connectionStatusBadge.classList.add('text-slate-400');
       el.connectionStatusBadge.classList.remove('text-emerald-300', 'border-emerald-500/30', 'bg-emerald-950/20');
@@ -303,6 +349,10 @@
 
       el.notConnectedBanner.classList.remove('hidden');
       el.explorerContainer.classList.add('hidden');
+
+      if (el.pluginsServerStatus) {
+        el.pluginsServerStatus.innerHTML = 'Target Server: <span class="text-rose-400 font-medium">No Active Connection</span>';
+      }
     }
   }
 
@@ -497,6 +547,7 @@
     el.connUsername.value = conn.username;
     el.connPassword.value = '';
     el.connDefaultPath.value = conn.default_path || '/';
+    if (el.connPluginsPath) el.connPluginsPath.value = conn.plugins_path || '/plugins';
     el.passwordHint.classList.remove('hidden');
     openModal(el.connectionModal);
   }
@@ -508,6 +559,7 @@
     el.connProtocol.value = 'sftp';
     el.connPort.value = '22';
     el.connDefaultPath.value = '/';
+    if (el.connPluginsPath) el.connPluginsPath.value = '/plugins';
     el.passwordHint.classList.add('hidden');
     openModal(el.connectionModal);
   }
@@ -942,30 +994,491 @@
 
   // --- TAB SWITCHER ---
   function switchView(viewName) {
+    el.fileExplorerView.classList.add('hidden');
+    if (el.pluginsView) el.pluginsView.classList.add('hidden');
+    el.vaultView.classList.add('hidden');
+
+    const inactiveClass = 'tab-btn flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium flex items-center justify-center gap-1.5 transition text-slate-400 hover:text-white whitespace-nowrap';
+    const activeClassIndigo = 'tab-btn active flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-1.5 transition bg-indigo-600 text-white shadow whitespace-nowrap';
+    const activeClassEmerald = 'tab-btn active flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-1.5 transition bg-emerald-600 text-white shadow whitespace-nowrap';
+
+    el.viewFilesBtn.className = inactiveClass;
+    if (el.viewPluginsBtn) el.viewPluginsBtn.className = inactiveClass;
+    el.viewVaultBtn.className = inactiveClass;
+
     if (viewName === 'files') {
       el.fileExplorerView.classList.remove('hidden');
-      el.vaultView.classList.add('hidden');
-      el.viewFilesBtn.className =
-        'tab-btn active px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition bg-indigo-600 text-white shadow';
-      el.viewVaultBtn.className =
-        'tab-btn px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition text-slate-400 hover:text-white';
+      el.viewFilesBtn.className = activeClassIndigo;
+    } else if (viewName === 'plugins') {
+      if (el.pluginsView) el.pluginsView.classList.remove('hidden');
+      if (el.viewPluginsBtn) el.viewPluginsBtn.className = activeClassEmerald;
+      initPluginsView();
     } else if (viewName === 'vault') {
-      el.fileExplorerView.classList.add('hidden');
       el.vaultView.classList.remove('hidden');
-      el.viewVaultBtn.className =
-        'tab-btn active px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition bg-indigo-600 text-white shadow';
-      el.viewFilesBtn.className =
-        'tab-btn px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition text-slate-400 hover:text-white';
+      el.viewVaultBtn.className = activeClassIndigo;
       loadConnections();
     }
   }
 
   el.viewFilesBtn.addEventListener('click', () => switchView('files'));
+  if (el.viewPluginsBtn) el.viewPluginsBtn.addEventListener('click', () => switchView('plugins'));
   el.viewVaultBtn.addEventListener('click', () => switchView('vault'));
+  if (el.openPluginsFromExplorerBtn) {
+    el.openPluginsFromExplorerBtn.addEventListener('click', () => switchView('plugins'));
+  }
 
   document.querySelectorAll('.trigger-vault-switch').forEach((btn) => {
     btn.addEventListener('click', () => switchView('vault'));
   });
+
+  // --- MINECRAFT PLUGIN MANAGER FRONTEND ---
+
+  function initPluginsView() {
+    if (el.pluginsTargetDirInput) {
+      el.pluginsTargetDirInput.value = state.pluginsTargetDir;
+    }
+
+    if (state.sessionInfo) {
+      el.pluginsServerStatus.innerHTML = `Target Server: <span class="text-emerald-400 font-semibold">${escapeHtml(state.sessionInfo.username)}@${escapeHtml(state.sessionInfo.host)}:${state.sessionInfo.port}</span> <span class="text-[10px] text-slate-500 font-mono uppercase">(${(state.sessionInfo.protocol || 'sftp').toUpperCase()})</span>`;
+    } else {
+      el.pluginsServerStatus.innerHTML = `Target Server: <span class="text-rose-400 font-medium">No Active Connection</span> <span class="text-slate-500"> — connect via Quick Connect or Saved Vault</span>`;
+    }
+
+    if (!state.isPluginsLoaded) {
+      loadPopularPlugins();
+    }
+
+    if (state.sessionId) {
+      loadInstalledPlugins(false);
+    }
+  }
+
+  function switchPluginSubTab(tab) {
+    if (tab === 'browse') {
+      el.browsePluginsSection.classList.remove('hidden');
+      el.installedPluginsSection.classList.add('hidden');
+      el.subTabBrowseBtn.className = 'subtab-btn active px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition bg-emerald-600 text-white shadow';
+      el.subTabInstalledBtn.className = 'subtab-btn px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition text-slate-400 hover:text-white';
+    } else {
+      el.browsePluginsSection.classList.add('hidden');
+      el.installedPluginsSection.classList.remove('hidden');
+      el.subTabInstalledBtn.className = 'subtab-btn active px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition bg-emerald-600 text-white shadow';
+      el.subTabBrowseBtn.className = 'subtab-btn px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition text-slate-400 hover:text-white';
+      loadInstalledPlugins();
+    }
+  }
+
+  if (el.subTabBrowseBtn) el.subTabBrowseBtn.addEventListener('click', () => switchPluginSubTab('browse'));
+  if (el.subTabInstalledBtn) el.subTabInstalledBtn.addEventListener('click', () => switchPluginSubTab('installed'));
+  if (el.gotoBrowseBtn) el.gotoBrowseBtn.addEventListener('click', () => switchPluginSubTab('browse'));
+
+  async function loadPopularPlugins() {
+    el.pluginsLoading.classList.remove('hidden');
+    el.pluginsEmptyState.classList.add('hidden');
+    el.pluginCardsGrid.innerHTML = '';
+
+    try {
+      const res = await api('/api/plugins/popular');
+      state.pluginsList = res.plugins || [];
+      state.isPluginsLoaded = true;
+      renderPluginCards(state.pluginsList);
+    } catch (err) {
+      showToast('Error loading popular plugins: ' + err.message, 'error');
+    } finally {
+      el.pluginsLoading.classList.add('hidden');
+    }
+  }
+
+  async function searchMinecraftPlugins(query = '') {
+    const q = query.trim();
+    const source = el.pluginSourceSelect ? el.pluginSourceSelect.value : 'all';
+
+    el.pluginsLoading.classList.remove('hidden');
+    el.pluginsEmptyState.classList.add('hidden');
+    el.pluginCardsGrid.innerHTML = '';
+
+    try {
+      const res = await api(`/api/plugins/search?q=${encodeURIComponent(q)}&source=${encodeURIComponent(source)}`);
+      state.pluginsList = res.plugins || [];
+      renderPluginCards(state.pluginsList);
+      if (state.pluginsList.length === 0) {
+        el.pluginsEmptyState.classList.remove('hidden');
+      }
+    } catch (err) {
+      showToast('Search error: ' + err.message, 'error');
+      el.pluginsEmptyState.classList.remove('hidden');
+    } finally {
+      el.pluginsLoading.classList.add('hidden');
+    }
+  }
+
+  function renderPluginCards(plugins) {
+    el.pluginCardsGrid.innerHTML = '';
+    if (!plugins || plugins.length === 0) {
+      el.pluginsEmptyState.classList.remove('hidden');
+      return;
+    }
+    el.pluginsEmptyState.classList.add('hidden');
+
+    plugins.forEach((plugin) => {
+      const card = document.createElement('div');
+      card.className = 'bg-slate-900/90 border border-cardBorder rounded-2xl p-4 sm:p-5 flex flex-col justify-between hover:border-emerald-500/40 transition-all shadow-md group relative overflow-hidden';
+
+      const sourceBadge = plugin.source === 'modrinth'
+        ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/80 uppercase tracking-wider">Modrinth</span>`
+        : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800/80 uppercase tracking-wider">SpigotMC</span>`;
+
+      let iconHtml = '';
+      if (plugin.iconUrl) {
+        iconHtml = `<img src="${escapeHtml(plugin.iconUrl)}" alt="${escapeHtml(plugin.name)}" class="w-12 h-12 rounded-xl object-contain bg-slate-800 border border-slate-700/60 p-1 shrink-0" onerror="this.onerror=null;this.parentNode.innerHTML='<div class=\\'w-12 h-12 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 flex items-center justify-center shrink-0 text-xl\\'><i class=\\'fa-solid fa-cube\\'></i></div>';" />`;
+      } else {
+        iconHtml = `<div class="w-12 h-12 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 flex items-center justify-center shrink-0 text-xl"><i class="fa-solid fa-cube"></i></div>`;
+      }
+
+      const downloadsFormatted = typeof plugin.downloads === 'number'
+        ? (plugin.downloads >= 1000000 ? (plugin.downloads / 1000000).toFixed(1) + 'M' : (plugin.downloads >= 1000 ? (plugin.downloads / 1000).toFixed(0) + 'K' : plugin.downloads))
+        : (plugin.downloads || '10K+');
+
+      card.innerHTML = `
+        <div class="space-y-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-center gap-3">
+              ${iconHtml}
+              <div class="min-w-0">
+                <h4 class="font-bold text-white text-sm sm:text-base leading-tight truncate group-hover:text-emerald-300 transition">${escapeHtml(plugin.name)}</h4>
+                <div class="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
+                  <span class="truncate max-w-[120px]">by ${escapeHtml(plugin.author || 'Community')}</span>
+                  <span>•</span>
+                  <span class="text-slate-300 font-mono text-[11px]"><i class="fa-solid fa-download text-[10px] text-slate-500 mr-0.5"></i>${downloadsFormatted}</span>
+                </div>
+              </div>
+            </div>
+            ${sourceBadge}
+          </div>
+
+          <p class="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+            ${escapeHtml(plugin.description || 'Minecraft server plugin.')}
+          </p>
+        </div>
+
+        <div class="pt-4 mt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+          <span class="text-[10px] font-mono text-slate-500 truncate">Dest: ${escapeHtml(state.pluginsTargetDir)}</span>
+          <button class="install-plugin-btn px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition whitespace-nowrap">
+            <i class="fa-solid fa-cloud-arrow-down"></i>
+            <span>Install</span>
+          </button>
+        </div>
+      `;
+
+      const installBtn = card.querySelector('.install-plugin-btn');
+      installBtn.addEventListener('click', () => installPlugin(plugin, installBtn));
+
+      el.pluginCardsGrid.appendChild(card);
+    });
+  }
+
+  async function installPlugin(plugin, btn) {
+    if (!state.sessionId) {
+      showToast('Please connect to an SFTP/FTP server before installing plugins.', 'warning');
+      switchView('files');
+      return;
+    }
+
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.className = 'px-3.5 py-2 rounded-xl bg-amber-600 text-white font-semibold text-xs flex items-center gap-1.5 shadow whitespace-nowrap cursor-wait';
+    btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i><span>Installing...</span>`;
+
+    showToast(`Downloading and installing ${plugin.name} to ${state.pluginsTargetDir}...`, 'info');
+
+    try {
+      const res = await api('/api/plugins/install', {
+        method: 'POST',
+        body: JSON.stringify({
+          source: plugin.source,
+          slug: plugin.slug || plugin.id,
+          projectId: plugin.id,
+          name: plugin.name,
+          targetDir: state.pluginsTargetDir,
+        }),
+      });
+
+      btn.className = 'px-3.5 py-2 rounded-xl bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow whitespace-nowrap';
+      btn.innerHTML = `<i class="fa-solid fa-check"></i><span>Installed!</span>`;
+      showToast(`Plugin '${res.plugin.name}' successfully installed to ${state.pluginsTargetDir}!`, 'success');
+
+      // Refresh installed plugins in background
+      loadInstalledPlugins(false);
+
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.className = 'install-plugin-btn px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition whitespace-nowrap';
+        btn.innerHTML = `<i class="fa-solid fa-rotate"></i><span>Reinstall</span>`;
+      }, 4000);
+    } catch (err) {
+      btn.disabled = false;
+      btn.className = 'install-plugin-btn px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow whitespace-nowrap';
+      btn.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span>Retry</span>`;
+      showToast('Install failed: ' + err.message, 'error');
+    }
+  }
+
+  async function loadInstalledPlugins(showLoadingIndicator = true) {
+    if (!state.sessionId) {
+      el.installedPluginsList.innerHTML = '';
+      el.noInstalledPlugins.classList.remove('hidden');
+      el.installedSummaryBadge.textContent = '';
+      if (el.installedLocationText) el.installedLocationText.textContent = `Directory: ${state.pluginsTargetDir} (Not Connected)`;
+      return;
+    }
+
+    if (showLoadingIndicator) {
+      el.installedLoading.classList.remove('hidden');
+      el.noInstalledPlugins.classList.add('hidden');
+      el.installedPluginsList.innerHTML = '';
+    }
+
+    try {
+      const res = await api(`/api/plugins/installed?path=${encodeURIComponent(state.pluginsTargetDir)}`);
+
+      if (res.detectedPath && res.detectedPath !== state.pluginsTargetDir) {
+        state.pluginsTargetDir = res.detectedPath;
+        if (el.pluginsTargetDirInput) el.pluginsTargetDirInput.value = res.detectedPath;
+        localStorage.setItem('akm_plugins_target_dir', res.detectedPath);
+      }
+
+      state.installedPlugins = res.plugins || [];
+      const count = state.installedPlugins.length;
+
+      if (el.installedCountBadge) el.installedCountBadge.textContent = count;
+      if (el.pluginsBadgeCount) {
+        el.pluginsBadgeCount.textContent = count;
+        if (count > 0) el.pluginsBadgeCount.classList.remove('hidden');
+      }
+
+      let totalBytes = 0;
+      state.installedPlugins.forEach((p) => { totalBytes += (p.size || 0); });
+
+      if (el.installedSummaryBadge) {
+        el.installedSummaryBadge.textContent = `${count} plugins (${formatBytes(totalBytes)})`;
+      }
+      if (el.installedLocationText) {
+        el.installedLocationText.textContent = `Directory: ${state.pluginsTargetDir}`;
+      }
+
+      renderInstalledPluginsList(state.installedPlugins);
+    } catch (err) {
+      showToast('Error scanning installed plugins: ' + err.message, 'error');
+      el.noInstalledPlugins.classList.remove('hidden');
+    } finally {
+      el.installedLoading.classList.add('hidden');
+    }
+  }
+
+  function renderInstalledPluginsList(plugins) {
+    el.installedPluginsList.innerHTML = '';
+    if (!plugins || plugins.length === 0) {
+      el.noInstalledPlugins.classList.remove('hidden');
+      return;
+    }
+    el.noInstalledPlugins.classList.add('hidden');
+
+    plugins.forEach((plugin) => {
+      const item = document.createElement('div');
+      item.className = 'p-3.5 sm:p-4 flex items-center justify-between gap-3 hover:bg-slate-800/40 transition';
+
+      const fullFilePath = state.pluginsTargetDir === '/' ? `/${plugin.name}` : `${state.pluginsTargetDir}/${plugin.name}`;
+      const modTime = plugin.modifyTime ? new Date(plugin.modifyTime).toLocaleDateString() : '';
+
+      item.innerHTML = `
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-cube text-lg"></i>
+          </div>
+          <div class="min-w-0">
+            <div class="font-mono font-semibold text-white text-xs sm:text-sm truncate">${escapeHtml(plugin.name)}</div>
+            <div class="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+              <span class="font-mono text-emerald-400/90">${formatBytes(plugin.size || 0)}</span>
+              ${modTime ? `<span>•</span><span>${modTime}</span>` : ''}
+              <span>•</span>
+              <span class="text-slate-500 font-mono truncate max-w-[120px] sm:max-w-xs">${escapeHtml(state.pluginsTargetDir)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button class="dl-installed-btn p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Download .jar file">
+            <i class="fa-solid fa-cloud-arrow-down text-xs"></i>
+          </button>
+          <button class="del-installed-btn p-2 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition" title="Delete Plugin">
+            <i class="fa-regular fa-trash-can text-xs"></i>
+          </button>
+        </div>
+      `;
+
+      item.querySelector('.dl-installed-btn').addEventListener('click', () => {
+        downloadFile(fullFilePath, plugin.name);
+      });
+
+      item.querySelector('.del-installed-btn').addEventListener('click', async () => {
+        if (!confirm(`Are you sure you want to remove '${plugin.name}' from your server?`)) return;
+        try {
+          await api('/api/plugins/delete', {
+            method: 'POST',
+            body: JSON.stringify({ path: fullFilePath }),
+          });
+          showToast(`Deleted ${plugin.name} successfully`, 'success');
+          loadInstalledPlugins();
+        } catch (err) {
+          showToast('Failed to delete plugin: ' + err.message, 'error');
+        }
+      });
+
+      el.installedPluginsList.appendChild(item);
+    });
+  }
+
+  // Set / Save Target Plugins Directory
+  if (el.savePluginsTargetDirBtn) {
+    el.savePluginsTargetDirBtn.addEventListener('click', () => {
+      const p = el.pluginsTargetDirInput.value.trim();
+      if (!p) return;
+      state.pluginsTargetDir = p;
+      localStorage.setItem('akm_plugins_target_dir', p);
+      showToast(`Plugins directory set to: ${p}`, 'success');
+      loadInstalledPlugins();
+    });
+  }
+
+  if (el.pluginsTargetDirInput) {
+    el.pluginsTargetDirInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        el.savePluginsTargetDirBtn.click();
+      }
+    });
+  }
+
+  // Preset Buttons
+  document.querySelectorAll('.plugin-preset-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.path;
+      if (p) {
+        state.pluginsTargetDir = p;
+        if (el.pluginsTargetDirInput) el.pluginsTargetDirInput.value = p;
+        localStorage.setItem('akm_plugins_target_dir', p);
+        showToast(`Plugins directory set to: ${p}`, 'info');
+        loadInstalledPlugins();
+      }
+    });
+  });
+
+  // Auto Detect Plugins Directory
+  if (el.autoDetectPluginsDirBtn) {
+    el.autoDetectPluginsDirBtn.addEventListener('click', async () => {
+      if (!state.sessionId) {
+        showToast('Please connect to your server first to auto-detect.', 'warning');
+        return;
+      }
+      const origHtml = el.autoDetectPluginsDirBtn.innerHTML;
+      el.autoDetectPluginsDirBtn.disabled = true;
+      el.autoDetectPluginsDirBtn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin text-amber-400"></i> Detecting...`;
+
+      try {
+        const res = await api('/api/plugins/detect');
+        state.pluginsTargetDir = res.path;
+        if (el.pluginsTargetDirInput) el.pluginsTargetDirInput.value = res.path;
+        localStorage.setItem('akm_plugins_target_dir', res.path);
+        showToast(`Detected ${res.hosting} server! Plugins directory: ${res.path}`, 'success');
+        loadInstalledPlugins();
+      } catch (err) {
+        showToast('Detection error: ' + err.message, 'error');
+      } finally {
+        el.autoDetectPluginsDirBtn.disabled = false;
+        el.autoDetectPluginsDirBtn.innerHTML = origHtml;
+      }
+    });
+  }
+
+  // Search & Category Pill Listeners
+  if (el.pluginSearchSubmitBtn) {
+    el.pluginSearchSubmitBtn.addEventListener('click', () => {
+      searchMinecraftPlugins(el.pluginSearchInput.value);
+    });
+  }
+
+  if (el.pluginSearchInput) {
+    el.pluginSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        searchMinecraftPlugins(el.pluginSearchInput.value);
+      }
+    });
+  }
+
+  if (el.pluginSourceSelect) {
+    el.pluginSourceSelect.addEventListener('change', () => {
+      searchMinecraftPlugins(el.pluginSearchInput.value);
+    });
+  }
+
+  document.querySelectorAll('.cat-pill').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      const tag = pill.dataset.tag;
+      if (el.pluginSearchInput) el.pluginSearchInput.value = tag;
+      searchMinecraftPlugins(tag);
+    });
+  });
+
+  // Refresh & Upload Custom Plugins
+  if (el.refreshPluginsBtn) {
+    el.refreshPluginsBtn.addEventListener('click', () => {
+      loadInstalledPlugins();
+      showToast('Refreshed plugins list', 'info');
+    });
+  }
+
+  if (el.pluginUploadInput) {
+    el.pluginUploadInput.addEventListener('change', async (e) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+      if (!state.sessionId) {
+        showToast('Please connect to your server before uploading plugins.', 'warning');
+        return;
+      }
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file.name.endsWith('.jar')) {
+          showToast(`Warning: ${file.name} does not appear to be a .jar plugin file`, 'warning');
+        }
+
+        showToast(`Uploading plugin ${file.name} to ${state.pluginsTargetDir}...`, 'info');
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('remoteDir', state.pluginsTargetDir);
+
+        try {
+          await api('/api/sftp/upload', {
+            method: 'POST',
+            body: formData,
+          });
+          showToast(`Uploaded ${file.name} to plugins successfully!`, 'success');
+        } catch (err) {
+          showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
+        }
+      }
+
+      e.target.value = '';
+      loadInstalledPlugins();
+    });
+  }
+
+  if (el.openPluginsInExplorerBtn) {
+    el.openPluginsInExplorerBtn.addEventListener('click', () => {
+      state.currentPath = state.pluginsTargetDir;
+      switchView('files');
+      loadDirectory(state.pluginsTargetDir);
+    });
+  }
 
   // --- AUTH TABS & SUBMISSIONS ---
   el.tabLoginBtn.addEventListener('click', () => {
@@ -1190,6 +1703,7 @@
       auth_type: protocol,
       protocol: protocol,
       default_path: el.connDefaultPath.value.trim() || '/',
+      plugins_path: (el.connPluginsPath ? el.connPluginsPath.value.trim() : '') || '/plugins',
     };
 
     try {

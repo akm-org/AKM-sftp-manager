@@ -178,12 +178,17 @@
 
       <!-- Navigation Tabs & Quick Stats (Mobile-first responsive grid) -->
       <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-2 border-b border-cardBorder">
-        <div class="flex items-center gap-1.5 p-1 bg-cardBg border border-cardBorder rounded-xl">
-          <button id="viewFilesBtn" class="tab-btn active flex-1 sm:flex-initial px-3.5 py-2.5 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition bg-indigo-600 text-white shadow">
+        <div class="flex items-center gap-1.5 p-1 bg-cardBg border border-cardBorder rounded-xl overflow-x-auto">
+          <button id="viewFilesBtn" class="tab-btn active flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-1.5 transition bg-indigo-600 text-white shadow whitespace-nowrap">
             <i class="fa-solid fa-folder-open"></i>
             <span>File Explorer</span>
           </button>
-          <button id="viewVaultBtn" class="tab-btn flex-1 sm:flex-initial px-3.5 py-2.5 rounded-lg text-xs sm:text-sm font-medium flex items-center justify-center gap-1.5 transition text-slate-400 hover:text-white">
+          <button id="viewPluginsBtn" class="tab-btn flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium flex items-center justify-center gap-1.5 transition text-slate-400 hover:text-white whitespace-nowrap">
+            <i class="fa-solid fa-cube text-emerald-400"></i>
+            <span>MC Plugins</span>
+            <span id="pluginsBadgeCount" class="hidden ml-0.5 px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/60">0</span>
+          </button>
+          <button id="viewVaultBtn" class="tab-btn flex-1 sm:flex-initial px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium flex items-center justify-center gap-1.5 transition text-slate-400 hover:text-white whitespace-nowrap">
             <i class="fa-solid fa-vault"></i>
             <span>Saved</span>
             <span id="vaultBadgeCount" class="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-slate-800 text-indigo-400">0</span>
@@ -266,20 +271,26 @@
 
           <!-- Explorer Actions Bar -->
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 px-1">
-            <div class="grid grid-cols-3 sm:flex items-center gap-2">
-              <button id="newFileBtn" class="touch-action-btn px-2.5 py-2 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center justify-center gap-1.5 transition">
+            <div class="grid grid-cols-4 sm:flex items-center gap-2">
+              <button id="newFileBtn" class="touch-action-btn px-2 py-2 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center justify-center gap-1.5 transition">
                 <i class="fa-regular fa-file text-cyan-400"></i>
-                <span>New File</span>
+                <span class="hidden xs:inline">New File</span>
+                <span class="xs:hidden">File</span>
               </button>
-              <button id="newFolderBtn" class="touch-action-btn px-2.5 py-2 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center justify-center gap-1.5 transition">
+              <button id="newFolderBtn" class="touch-action-btn px-2 py-2 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center justify-center gap-1.5 transition">
                 <i class="fa-regular fa-folder text-amber-400"></i>
-                <span>New Folder</span>
+                <span class="hidden xs:inline">New Folder</span>
+                <span class="xs:hidden">Folder</span>
               </button>
-              <label for="fileUploadInput" class="touch-action-btn cursor-pointer px-2.5 py-2 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center justify-center gap-1.5 transition">
+              <label for="fileUploadInput" class="touch-action-btn cursor-pointer px-2 py-2 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center justify-center gap-1.5 transition">
                 <i class="fa-solid fa-cloud-arrow-up text-indigo-400"></i>
                 <span>Upload</span>
                 <input type="file" id="fileUploadInput" class="hidden" multiple />
               </label>
+              <button id="openPluginsFromExplorerBtn" class="touch-action-btn px-2 py-2 sm:px-3 sm:py-1.5 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 rounded-xl text-xs font-semibold border border-emerald-800/60 flex items-center justify-center gap-1.5 transition shadow">
+                <i class="fa-solid fa-cube text-emerald-400"></i>
+                <span>Plugins</span>
+              </button>
             </div>
             <div class="text-xs text-slate-400 flex items-center justify-between sm:justify-end gap-3 px-1">
               <span id="directoryItemCount">0 items</span>
@@ -328,7 +339,180 @@
         </div>
       </div>
 
-      <!-- VIEW 2: SAVED CONNECTIONS VAULT -->
+      <!-- VIEW 2: MINECRAFT PLUGIN MANAGER -->
+      <div id="pluginsView" class="hidden space-y-5">
+        
+        <!-- Header & Target Directory Bar -->
+        <div class="bg-cardBg border border-cardBorder rounded-2xl p-4 sm:p-5 shadow-lg space-y-4">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-cube text-xl"></i>
+              </div>
+              <div>
+                <h3 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                  <span>Minecraft Plugin Manager</span>
+                  <span class="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800/80 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">Modrinth & Spigot</span>
+                </h3>
+                <p id="pluginsServerStatus" class="text-xs text-slate-400 mt-0.5 truncate">
+                  Target Server: <span class="text-slate-200 font-medium">Not Connected</span>
+                </p>
+              </div>
+            </div>
+
+            <!-- Plugins Directory Config -->
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-900/90 border border-slate-700/80 rounded-xl p-1.5">
+              <div class="flex items-center gap-1.5 px-2">
+                <i class="fa-regular fa-folder-closed text-slate-400 text-xs"></i>
+                <span class="text-xs font-semibold text-slate-300 whitespace-nowrap">Plugins Dir:</span>
+              </div>
+              <input type="text" id="pluginsTargetDirInput" value="/plugins" class="bg-slate-800 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500 min-w-[140px]" />
+              <button id="savePluginsTargetDirBtn" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition" title="Apply Destination Directory">
+                Set Path
+              </button>
+              <button id="autoDetectPluginsDirBtn" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium border border-slate-700 transition" title="Auto detect /plugins vs /default/plugins">
+                <i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i>
+                <span class="hidden lg:inline ml-1">Detect</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Presets -->
+          <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-cardBorder text-xs text-slate-400">
+            <span class="font-medium">Quick Path Presets:</span>
+            <button class="plugin-preset-btn px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[11px] transition" data-path="/plugins">/plugins (Standard)</button>
+            <button class="plugin-preset-btn px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[11px] transition" data-path="/default/plugins">/default/plugins (Apex/Multicraft)</button>
+            <button class="plugin-preset-btn px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[11px] transition" data-path="/">/ (Root)</button>
+          </div>
+        </div>
+
+        <!-- Sub Tabs (Browse / Installed) -->
+        <div class="flex items-center justify-between gap-3 border-b border-cardBorder pb-2">
+          <div class="flex items-center gap-2 p-1 bg-cardBg border border-cardBorder rounded-xl">
+            <button id="subTabBrowseBtn" class="subtab-btn active px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition bg-emerald-600 text-white shadow">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>Browse & Install</span>
+            </button>
+            <button id="subTabInstalledBtn" class="subtab-btn px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition text-slate-400 hover:text-white">
+              <i class="fa-solid fa-boxes-stacked"></i>
+              <span>Installed on Server</span>
+              <span id="installedCountBadge" class="ml-1 px-1.5 py-0.2 rounded-full bg-slate-800 text-emerald-400 text-[10px] font-bold">0</span>
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="refreshPluginsBtn" class="touch-action-btn px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition" title="Refresh">
+              <i class="fa-solid fa-rotate-right"></i>
+              <span class="hidden sm:inline">Refresh</span>
+            </button>
+            <label for="pluginUploadInput" class="touch-action-btn cursor-pointer px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition">
+              <i class="fa-solid fa-upload text-emerald-400"></i>
+              <span>Upload .jar</span>
+              <input type="file" id="pluginUploadInput" accept=".jar" class="hidden" />
+            </label>
+          </div>
+        </div>
+
+        <!-- SUB VIEW 1: BROWSE & SEARCH -->
+        <div id="browsePluginsSection" class="space-y-4">
+          <!-- Search & Filters -->
+          <div class="bg-cardBg border border-cardBorder rounded-2xl p-4 shadow space-y-3">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div class="relative flex-1">
+                <input type="text" id="pluginSearchInput" placeholder="Search Minecraft plugins (e.g. Essentials, LuckPerms, WorldEdit, Vault, ViaVersion)..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition" />
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-500 text-xs"></i>
+              </div>
+              <select id="pluginSourceSelect" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-medium">
+                <option value="all">All Sources (Modrinth + Spigot)</option>
+                <option value="modrinth">Modrinth Plugins</option>
+                <option value="spigot">SpigotMC Resources</option>
+              </select>
+              <button id="pluginSearchSubmitBtn" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-1.5">
+                <span>Search</span>
+              </button>
+            </div>
+
+            <!-- Category Pills -->
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              <span class="text-slate-500 text-[11px] font-semibold uppercase tracking-wider shrink-0 mr-1">Popular:</span>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="">🔥 Featured</button>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="essentials">Essentials</button>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="luckperms">Permissions</button>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="worldedit">WorldEdit</button>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="vault">Economy</button>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="geyser">Bedrock / Geyser</button>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="performance">Performance / Lag</button>
+              <button class="cat-pill px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium whitespace-nowrap transition" data-tag="viaversion">ViaVersion</button>
+            </div>
+          </div>
+
+          <!-- Plugin Results Grid -->
+          <div id="pluginCardsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Dynamic Plugin Cards injected here -->
+          </div>
+
+          <!-- Loading Spinner -->
+          <div id="pluginsLoading" class="hidden py-16 text-center text-emerald-400">
+            <i class="fa-solid fa-circle-notch fa-spin text-3xl mb-3"></i>
+            <p class="text-xs text-slate-400">Searching Minecraft plugins from Modrinth & Spigot...</p>
+          </div>
+
+          <!-- Empty State -->
+          <div id="pluginsEmptyState" class="hidden py-16 text-center text-slate-500">
+            <i class="fa-solid fa-box-open text-4xl mb-3 block"></i>
+            <p class="text-sm font-medium">No plugins found matching your search</p>
+            <p class="text-xs text-slate-500 mt-1">Try another keyword or search term</p>
+          </div>
+        </div>
+
+        <!-- SUB VIEW 2: INSTALLED PLUGINS -->
+        <div id="installedPluginsSection" class="hidden space-y-4">
+          <div class="bg-cardBg border border-cardBorder rounded-2xl overflow-hidden shadow-xl">
+            <div class="p-4 bg-slate-900/60 border-b border-cardBorder flex items-center justify-between">
+              <div>
+                <h4 class="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Server Plugins (.jar)</span>
+                  <span id="installedSummaryBadge" class="text-xs font-mono text-emerald-400 font-normal"></span>
+                </h4>
+                <p id="installedLocationText" class="text-xs font-mono text-slate-400 mt-0.5">Directory: /plugins</p>
+              </div>
+              <button id="openPluginsInExplorerBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition">
+                <i class="fa-solid fa-folder-open text-indigo-400"></i>
+                <span class="hidden sm:inline">Open in File Explorer</span>
+              </button>
+            </div>
+
+            <!-- Installed Plugins List -->
+            <div id="installedPluginsList" class="divide-y divide-cardBorder">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Installed Loading -->
+            <div id="installedLoading" class="hidden py-16 text-center text-emerald-400">
+              <i class="fa-solid fa-circle-notch fa-spin text-3xl mb-3"></i>
+              <p class="text-xs text-slate-400">Scanning server plugins folder...</p>
+            </div>
+
+            <!-- No Installed Plugins Found -->
+            <div id="noInstalledPlugins" class="hidden py-16 text-center text-slate-500">
+              <div class="w-12 h-12 mx-auto rounded-xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-center text-slate-400 mb-3">
+                <i class="fa-solid fa-cube text-xl"></i>
+              </div>
+              <h5 class="text-sm font-bold text-white mb-1">No Plugins Found in Directory</h5>
+              <p class="text-xs text-slate-400 max-w-sm mx-auto mb-4">
+                No .jar plugin files were detected in the destination folder. Make sure your plugins path is correct or install plugins from Modrinth / Spigot.
+              </p>
+              <button id="gotoBrowseBtn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <span>Browse Minecraft Plugins</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- VIEW 3: SAVED CONNECTIONS VAULT -->
       <div id="vaultView" class="hidden space-y-6">
         <div class="flex items-center justify-between">
           <div>
@@ -508,9 +692,15 @@
           </div>
         </div>
 
-        <div>
-          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Default Directory</label>
-          <input type="text" id="connDefaultPath" value="/" placeholder="/" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Default Directory</label>
+            <input type="text" id="connDefaultPath" value="/" placeholder="/" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-1">Plugins Directory</label>
+            <input type="text" id="connPluginsPath" value="/plugins" placeholder="/plugins or /default/plugins" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-emerald-500" />
+          </div>
         </div>
 
         <div class="pt-3 flex items-center justify-between border-t border-cardBorder">
